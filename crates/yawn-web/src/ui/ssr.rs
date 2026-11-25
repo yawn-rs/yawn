@@ -39,10 +39,10 @@ pub(crate) fn fetched(name: &str, ask: impl FnOnce() -> Pending) -> Option<Optio
         if let Some(found) = p.done.get(name) {
             return Some(Some(found.clone()));
         }
-        if !p.open.iter().any(|(n, _)| n == name) {
-            if let Some(ask) = ask.take() {
-                p.open.push((name.to_string(), ask()));
-            }
+        if !p.open.iter().any(|(n, _)| n == name)
+            && let Some(ask) = ask.take()
+        {
+            p.open.push((name.to_string(), ask()));
         }
         Some(None)
     });

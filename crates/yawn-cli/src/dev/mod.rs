@@ -300,13 +300,13 @@ impl Dev {
         let (raw_tx, raw_rx) = mpsc::channel::<Vec<PathBuf>>();
         let mut watcher =
             notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-                if let Ok(ev) = res {
-                    if matches!(
+                if let Ok(ev) = res
+                    && matches!(
                         ev.kind,
                         EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
-                    ) {
-                        let _ = raw_tx.send(ev.paths);
-                    }
+                    )
+                {
+                    let _ = raw_tx.send(ev.paths);
                 }
             })?;
         let root = &self.project.root;
@@ -967,12 +967,12 @@ impl Dev {
                 .nth(1)
                 .unwrap_or("")
                 .to_string();
-            if let Some(want) = config::locked_version(&self.project.root, "wasm-bindgen") {
-                if want != have {
-                    return Err(format!(
-                        "wasm-bindgen CLI {have} does not match the project's wasm-bindgen {want}. Fix: cargo install -f wasm-bindgen-cli --version {want}"
-                    ));
-                }
+            if let Some(want) = config::locked_version(&self.project.root, "wasm-bindgen")
+                && want != have
+            {
+                return Err(format!(
+                    "wasm-bindgen CLI {have} does not match the project's wasm-bindgen {want}. Fix: cargo install -f wasm-bindgen-cli --version {want}"
+                ));
             }
             self.bindgen_checked = true;
         }
@@ -1120,10 +1120,10 @@ impl Dev {
     }
 
     fn send_control(&self, line: &str) {
-        if let Some(sp) = &self.server {
-            if let Some(stdin) = sp.stdin.borrow_mut().as_mut() {
-                let _ = writeln!(stdin, "{line}").and_then(|_| stdin.flush());
-            }
+        if let Some(sp) = &self.server
+            && let Some(stdin) = sp.stdin.borrow_mut().as_mut()
+        {
+            let _ = writeln!(stdin, "{line}").and_then(|_| stdin.flush());
         }
     }
 

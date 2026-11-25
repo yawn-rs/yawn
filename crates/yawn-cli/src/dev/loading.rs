@@ -25,7 +25,10 @@ pub struct Loading {
 impl Loading {
     /// Starts listening on `host:port`
     pub fn start(host: IpAddr, port: u16) -> Option<Loading> {
-        let listener = TcpListener::bind(SocketAddr::new(host, port)).ok()?;
+        Self::serve_on(TcpListener::bind(SocketAddr::new(host, port)).ok()?)
+    }
+
+    fn serve_on(listener: TcpListener) -> Option<Loading> {
         listener.set_nonblocking(true).ok()?;
         let status = Arc::new(Mutex::new(Status::default()));
         let stop = Arc::new(AtomicBool::new(false));
@@ -165,10 +168,9 @@ mod tests {
 
     #[test]
     fn serves_page_and_status_then_releases_the_port() {
-        let probe = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-        let addr = probe.local_addr().unwrap();
-        drop(probe);
-        let l = Loading::start(addr.ip(), addr.port()).expect("port is free");
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let l = Loading::serve_on(listener).expect("listener accepts non-blocking mode");
         l.set(|s| {
             s.done = 3;
             s.total = 9;

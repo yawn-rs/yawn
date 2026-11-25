@@ -378,10 +378,10 @@ impl Server {
                     if a.get("command").is_some_and(Value::is_string) {
                         continue;
                     }
-                    if let Some(edit) = a.get_mut("edit") {
-                        if !self.map_edit(edit) {
-                            continue;
-                        }
+                    if let Some(edit) = a.get_mut("edit")
+                        && !self.map_edit(edit)
+                    {
+                        continue;
                     }
                     if let Some(o) = a.as_object_mut() {
                         o.remove("diagnostics");
@@ -399,10 +399,10 @@ impl Server {
             }
             Pending::ActionResolve => {
                 let mut a = res;
-                if let Some(edit) = a.get_mut("edit") {
-                    if !self.map_edit(edit) {
-                        a.as_object_mut().map(|o| o.remove("edit"));
-                    }
+                if let Some(edit) = a.get_mut("edit")
+                    && !self.map_edit(edit)
+                {
+                    a.as_object_mut().map(|o| o.remove("edit"));
                 }
                 a
             }
@@ -508,7 +508,7 @@ impl Server {
                     .unwrap_or_default();
                 let (mut line, mut ch) = (0u32, 0u32);
                 let mut toks: Vec<(u32, u32, u64, u64, u64)> = Vec::new();
-                for c in data.chunks_exact(5) {
+                for c in data.as_chunks::<5>().0 {
                     if c[0] > 0 {
                         line += c[0] as u32;
                         ch = c[1] as u32;
@@ -587,10 +587,9 @@ impl Server {
                     for key in ["uri", "oldUri", "newUri"] {
                         if let Some(u) =
                             item.get(key).and_then(Value::as_str).and_then(|u| Url::parse(u).ok())
+                            && self.resolve_generated(&u).is_some()
                         {
-                            if self.resolve_generated(&u).is_some() {
-                                return None;
-                            }
+                            return None;
                         }
                     }
                     out.push(item);

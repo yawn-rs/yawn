@@ -15,10 +15,10 @@ impl VisitMut for Listeners {
             return;
         };
         let names: Vec<_> = path.path.segments.iter().map(|s| s.ident.to_string()).collect();
-        if matches!(names.as_slice(), [rt, f] if rt == "__rt" && f == "listen") {
-            if let Some(handler) = call.args.iter_mut().nth(2) {
-                *handler = syn::parse_quote!(());
-            }
+        if matches!(names.as_slice(), [rt, f] if rt == "__rt" && f == "listen")
+            && let Some(handler) = call.args.iter_mut().nth(2)
+        {
+            *handler = syn::parse_quote!(());
         }
     }
 }
@@ -115,10 +115,10 @@ impl Snapshot {
                 if old == new {
                     unchanged.insert(key.clone());
                 }
-                if let Some(previous) = replacements.insert(key, new.clone()) {
-                    if previous != *new {
-                        return None;
-                    }
+                if let Some(previous) = replacements.insert(key, new.clone())
+                    && previous != *new
+                {
+                    return None;
                 }
             }
         }

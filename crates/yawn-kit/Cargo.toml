@@ -5,7 +5,6 @@ edition.workspace = true
 description = "Browser tools for Yawn applications (shortcuts, swipes, ...), written only on the framework's public API"
 license.workspace = true
 repository.workspace = true
-homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true

@@ -5,7 +5,6 @@ edition.workspace = true
 description = "The `yawn` command line tool: argument handling, event pipeline and terminal UI"
 license.workspace = true
 repository.workspace = true
-homepage.workspace = true
 keywords = ["cli", "web", "wasm", "rsx", "dev-server"]
 categories = ["command-line-utilities", "development-tools", "web-programming"]
 rust-version.workspace = true

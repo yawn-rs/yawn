@@ -426,7 +426,7 @@ impl Runtime {
         self.seq += 1;
         let rank = self.next_rank;
         self.next_rank += 1;
-        if rank % 64 == 0 {
+        if rank.is_multiple_of(64) {
             self.rs.ensure(rank as usize + 64);
         }
         let owner = self.owner_now.unwrap_or(NIL);
@@ -572,10 +572,10 @@ impl Runtime {
     pub(crate) fn context_dyn(&self, key: TypeId) -> Option<&dyn Any> {
         let mut cur = self.owner_now;
         while let Some(i) = cur.filter(|i| *i != NIL) {
-            if let Some(a) = &self.aux[i as usize] {
-                if let Some((_, v)) = a.context.iter().rev().find(|(t, _)| *t == key) {
-                    return Some(v.as_ref());
-                }
+            if let Some(a) = &self.aux[i as usize]
+                && let Some((_, v)) = a.context.iter().rev().find(|(t, _)| *t == key)
+            {
+                return Some(v.as_ref());
             }
             cur = Some(self.owner[i as usize]);
         }
@@ -613,12 +613,10 @@ impl Runtime {
                 self.ensure(idx);
             }
         }
-        if track {
-            if let Some(fr) = self.tracking.as_mut() {
-                let entry = (idx as u32, self.r#gen[idx]);
-                if fr.last() != Some(&entry) {
-                    fr.push(entry);
-                }
+        if track && let Some(fr) = self.tracking.as_mut() {
+            let entry = (idx as u32, self.r#gen[idx]);
+            if fr.last() != Some(&entry) {
+                fr.push(entry);
             }
         }
         Some(idx)
@@ -1192,12 +1190,11 @@ impl Runtime {
         }
         if detach_from_owner {
             let o = self.owner[root];
-            if o != NIL {
-                if let Some(a) = self.aux[o as usize].as_mut() {
-                    if let Some(p) = a.children.iter().position(|&c| c as usize == root) {
-                        a.children.swap_remove(p);
-                    }
-                }
+            if o != NIL
+                && let Some(a) = self.aux[o as usize].as_mut()
+                && let Some(p) = a.children.iter().position(|&c| c as usize == root)
+            {
+                a.children.swap_remove(p);
             }
         }
         for &x in order.iter().rev() {

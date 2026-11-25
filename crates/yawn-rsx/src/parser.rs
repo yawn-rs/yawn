@@ -98,23 +98,20 @@ pub fn headers(src: &str) -> Vec<Header> {
                 let mut params = Vec::new();
                 let mut defaults = Vec::new();
                 let mut next = name_end;
-                if let Ok(p) = scan::skip_trivia(src, name_end, src.len()) {
-                    if src[p..].starts_with('(') {
-                        if let Ok(close) = scan::find_close(src, p, src.len()) {
-                            if let Ok(list) = parse_params(src, p + 1, close) {
-                                defaults = list
-                                    .iter()
-                                    .filter(|q| q.default.is_some())
-                                    .map(|q| q.name.clone())
-                                    .collect();
-                                params = list
-                                    .into_iter()
-                                    .map(|q| (q.name, src[q.ty].to_string()))
-                                    .collect();
-                            }
-                            next = close + 1;
-                        }
+                if let Ok(p) = scan::skip_trivia(src, name_end, src.len())
+                    && src[p..].starts_with('(')
+                    && let Ok(close) = scan::find_close(src, p, src.len())
+                {
+                    if let Ok(list) = parse_params(src, p + 1, close) {
+                        defaults = list
+                            .iter()
+                            .filter(|q| q.default.is_some())
+                            .map(|q| q.name.clone())
+                            .collect();
+                        params =
+                            list.into_iter().map(|q| (q.name, src[q.ty].to_string())).collect();
                     }
+                    next = close + 1;
                 }
                 out.push(Header {
                     name: src[n..name_end].to_string(),
@@ -319,10 +316,10 @@ fn map_wrapped(
     let en = en.saturating_sub(prefix_len).min(text.len());
     // "unexpected end of input": the code is unfinished, so point at its last token
     let trimmed = text.trim_end();
-    if s >= trimmed.len() {
-        if let Some((i, c)) = trimmed.char_indices().last() {
-            return Diagnostic::new(e.to_string(), base + i..base + i + c.len_utf8());
-        }
+    if s >= trimmed.len()
+        && let Some((i, c)) = trimmed.char_indices().last()
+    {
+        return Diagnostic::new(e.to_string(), base + i..base + i + c.len_utf8());
     }
     let en = if en > s { en } else { (s + 1).min(text.len()).max(s) };
     Diagnostic::new(e.to_string(), base + s..base + en)

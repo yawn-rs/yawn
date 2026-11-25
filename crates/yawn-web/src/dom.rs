@@ -466,10 +466,10 @@ fn schedule(task: Task) {
         let waker = task_waker(task.clone());
         let mut cx = Context::from_waker(&waker);
         let mut slot = task.borrow_mut();
-        if let Some(fut) = slot.as_mut() {
-            if fut.as_mut().poll(&mut cx).is_ready() {
-                *slot = None;
-            }
+        if let Some(fut) = slot.as_mut()
+            && fut.as_mut().poll(&mut cx).is_ready()
+        {
+            *slot = None;
         }
     });
     queue_microtask_once(&run);

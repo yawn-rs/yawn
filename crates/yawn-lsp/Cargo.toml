@@ -5,7 +5,6 @@ edition.workspace = true
 description = "Language server for .rsx: rust-analyzer behind a source map, plus HTML and CSS completion"
 license.workspace = true
 repository.workspace = true
-homepage.workspace = true
 keywords = ["lsp", "language-server", "rsx", "web", "wasm"]
 include = ["src/**", "data/tailwind-classes.txt", "web/dist/web.cjs", "/README.md"]
 categories = ["development-tools", "web-programming"]

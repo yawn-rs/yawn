@@ -15,12 +15,11 @@ fn fix_paths(deps: &mut Value, up: &str) {
         return;
     };
     for dep in table.iter_mut().map(|(_, v)| v) {
-        if let Some(path) = dep.as_table_mut().and_then(|t| t.get_mut("path")) {
-            if let Some(p) = path.as_str() {
-                if !Path::new(p).is_absolute() {
-                    *path = Value::String(format!("{up}{p}"));
-                }
-            }
+        if let Some(path) = dep.as_table_mut().and_then(|t| t.get_mut("path"))
+            && let Some(p) = path.as_str()
+            && !Path::new(p).is_absolute()
+        {
+            *path = Value::String(format!("{up}{p}"));
         }
     }
 }
@@ -162,11 +161,11 @@ fn base_table(user: &str, router: bool, up: &str) -> Result<(Table, String), Str
     }
     if router {
         let deps = t.entry("dependencies").or_insert_with(|| Value::Table(Table::new()));
-        if let Some(deps) = deps.as_table_mut() {
-            if !deps.contains_key("yawn-router") {
-                let dep = router_dependency(deps)?;
-                deps.insert("yawn-router".into(), dep);
-            }
+        if let Some(deps) = deps.as_table_mut()
+            && !deps.contains_key("yawn-router")
+        {
+            let dep = router_dependency(deps)?;
+            deps.insert("yawn-router".into(), dep);
         }
     }
     for key in ["dependencies", "dev-dependencies", "build-dependencies"] {

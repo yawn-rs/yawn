@@ -150,21 +150,21 @@ fn draw_left(f: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         (None, _) if s.ended() => status.push(Span::styled("Session ended", theme.dim())),
         (None, _) => status.push(Span::styled("Waiting for the first build", theme.dim())),
     }
-    if s.running().is_none() {
-        if let Some(l) = s.last_build() {
-            status.push(Span::styled(format!(" {}", fmt_duration(l.duration)), theme.dim()));
-            if l.errors > 0 {
-                status.push(Span::styled(
-                    format!(" · {}", count(l.errors as u64, "error")),
-                    theme.error(),
-                ));
-            }
-            if l.warnings > 0 {
-                status.push(Span::styled(
-                    format!(" · {}", count(l.warnings as u64, "warning")),
-                    theme.warn(),
-                ));
-            }
+    if s.running().is_none()
+        && let Some(l) = s.last_build()
+    {
+        status.push(Span::styled(format!(" {}", fmt_duration(l.duration)), theme.dim()));
+        if l.errors > 0 {
+            status.push(Span::styled(
+                format!(" · {}", count(l.errors as u64, "error")),
+                theme.error(),
+            ));
+        }
+        if l.warnings > 0 {
+            status.push(Span::styled(
+                format!(" · {}", count(l.warnings as u64, "warning")),
+                theme.warn(),
+            ));
         }
     }
     f.render_widget(Paragraph::new(clip(status, w)), rows[2]);

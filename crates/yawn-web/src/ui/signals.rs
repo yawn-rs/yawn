@@ -160,10 +160,10 @@ impl<T: PartialEq + Clone + 'static> GlobalSig<T> {
     /// The signal itself, made now when there is none for the running application
     pub fn sig(&self) -> Sig<T> {
         let rt_id = with(|rt| rt.id());
-        if let Some((id, sig)) = self.slot.get() {
-            if id == rt_id {
-                return sig;
-            }
+        if let Some((id, sig)) = self.slot.get()
+            && id == rt_id
+        {
+            return sig;
         }
         let made = Sig(with(|rt| rt.signal_global((self.init)())));
         self.slot.set(Some((rt_id, made)));

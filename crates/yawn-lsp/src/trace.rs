@@ -17,10 +17,10 @@ pub fn init() {
 }
 
 pub fn write(msg: &str) {
-    if let Some(f) = FILE.get() {
-        if let Ok(mut f) = f.lock() {
-            let _ = writeln!(f, "{msg}");
-        }
+    if let Some(f) = FILE.get()
+        && let Ok(mut f) = f.lock()
+    {
+        let _ = writeln!(f, "{msg}");
     }
 }
 

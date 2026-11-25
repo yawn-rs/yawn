@@ -210,23 +210,23 @@ pub fn complete(
                 html.push(it);
             }
             for (name, line) in imports {
-                if index.find(name).is_none() {
-                    if let Some((_, insert)) = ROUTER_COMPONENTS.iter().find(|(n, _)| n == name) {
-                        let mut it = item(
-                            text,
-                            *start,
-                            offset,
-                            name,
-                            KIND_CLASS,
-                            Some("component (yawn_router)".into()),
-                            (*insert).to_string(),
-                        );
-                        let (at, new_text) = crate::server::import_edit(text, line);
-                        it["additionalTextEdits"] =
-                            json!([{"range": {"start": at, "end": at}, "newText": new_text}]);
-                        it["labelDetails"] = json!({"description": line.trim_start_matches("use ").trim_end_matches(';')});
-                        html.push(it);
-                    }
+                if index.find(name).is_none()
+                    && let Some((_, insert)) = ROUTER_COMPONENTS.iter().find(|(n, _)| n == name)
+                {
+                    let mut it = item(
+                        text,
+                        *start,
+                        offset,
+                        name,
+                        KIND_CLASS,
+                        Some("component (yawn_router)".into()),
+                        (*insert).to_string(),
+                    );
+                    let (at, new_text) = crate::server::import_edit(text, line);
+                    it["additionalTextEdits"] =
+                        json!([{"range": {"start": at, "end": at}, "newText": new_text}]);
+                    it["labelDetails"] = json!({"description": line.trim_start_matches("use ").trim_end_matches(';')});
+                    html.push(it);
                 }
             }
             // components of other crates (`use yawn_router::Router;`): their props aren't known

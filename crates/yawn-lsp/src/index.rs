@@ -28,10 +28,10 @@ impl Index {
         let mut found = Vec::new();
         walk(&root.join("src"), &mut found);
         for p in found {
-            if !self.files.contains_key(&p) {
-                if let Ok(text) = fs::read_to_string(&p) {
-                    self.set(p, &text);
-                }
+            if !self.files.contains_key(&p)
+                && let Ok(text) = fs::read_to_string(&p)
+            {
+                self.set(p, &text);
             }
         }
     }

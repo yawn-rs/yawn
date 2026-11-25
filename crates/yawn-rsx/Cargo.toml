@@ -5,7 +5,6 @@ edition.workspace = true
 description = "The .rsx compiler: parses Yawn .rsx files and generates Rust that drives yawn-web's fine-grained renderer"
 license.workspace = true
 repository.workspace = true
-homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true

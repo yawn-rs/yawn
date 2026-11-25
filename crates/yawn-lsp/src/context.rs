@@ -103,17 +103,18 @@ fn inside_component(src: &str, from: usize, to: usize, offset: usize) -> (Block,
             Kind::Open(_) => depth += 1,
             Kind::Close(_) => depth = depth.saturating_sub(1),
             Kind::Ident if depth == 0 && matches!(&src[i..end], "view" | "style") => {
-                if let Ok(after) = scan::skip_trivia(src, end, to) {
-                    if src[after..to].starts_with('{') && after < offset {
-                        let close = scan::find_close(src, after, to).unwrap_or(to);
-                        if offset <= close {
-                            let b = if &src[i..end] == "view" { Block::View } else { Block::Style };
-                            return (b, after);
-                        }
-                        found = (Block::Setup, from);
-                        i = close + 1;
-                        continue;
+                if let Ok(after) = scan::skip_trivia(src, end, to)
+                    && src[after..to].starts_with('{')
+                    && after < offset
+                {
+                    let close = scan::find_close(src, after, to).unwrap_or(to);
+                    if offset <= close {
+                        let b = if &src[i..end] == "view" { Block::View } else { Block::Style };
+                        return (b, after);
                     }
+                    found = (Block::Setup, from);
+                    i = close + 1;
+                    continue;
                 }
             }
             _ => {}
@@ -212,11 +213,11 @@ fn view_context(src: &str, from: usize, offset: usize) -> Ctx {
             }
             // `else {` opens a block of nodes like `if` does; left alone its `{` would be read as an expression
             Kind::Ident if &src[i..end] == "else" => {
-                if let Ok(after) = scan::skip_trivia(src, end, src.len()) {
-                    if src[after..].starts_with('{') {
-                        i = after + 1;
-                        continue;
-                    }
+                if let Ok(after) = scan::skip_trivia(src, end, src.len())
+                    && src[after..].starts_with('{')
+                {
+                    i = after + 1;
+                    continue;
                 }
             }
             Kind::Ident if matches!(&src[i..end], "if" | "for") => {

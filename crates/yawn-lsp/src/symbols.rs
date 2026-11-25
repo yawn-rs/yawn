@@ -95,10 +95,10 @@ fn first_block(src: &str, from: usize, to: usize) -> usize {
             Kind::Open(_) => depth += 1,
             Kind::Close(_) => depth = depth.saturating_sub(1),
             Kind::Ident if depth == 0 && matches!(&src[i..end], "view" | "style") => {
-                if let Ok(after) = scan::skip_trivia(src, end, to) {
-                    if src[after..to].starts_with('{') {
-                        return i;
-                    }
+                if let Ok(after) = scan::skip_trivia(src, end, to)
+                    && src[after..to].starts_with('{')
+                {
+                    return i;
                 }
             }
             _ => {}

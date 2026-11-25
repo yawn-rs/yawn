@@ -63,10 +63,10 @@ impl App {
 
     pub fn on_event(&mut self, e: Event) {
         self.state.apply(&e);
-        if let Event::Log(l) = e {
-            if self.wants(l.level) {
-                self.pending.push(l);
-            }
+        if let Event::Log(l) = e
+            && self.wants(l.level)
+        {
+            self.pending.push(l);
         }
     }
 

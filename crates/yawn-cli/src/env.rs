@@ -95,14 +95,14 @@ fn find_up(start: &Path, file: &str) -> Option<PathBuf> {
 }
 
 fn shorten_home(p: &Path) -> String {
-    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
-        if let Ok(rest) = p.strip_prefix(&home) {
-            return if rest.as_os_str().is_empty() {
-                "~".into()
-            } else {
-                format!("~/{}", rest.display())
-            };
-        }
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from)
+        && let Ok(rest) = p.strip_prefix(&home)
+    {
+        return if rest.as_os_str().is_empty() {
+            "~".into()
+        } else {
+            format!("~/{}", rest.display())
+        };
     }
     p.display().to_string()
 }

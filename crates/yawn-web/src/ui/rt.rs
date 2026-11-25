@@ -151,11 +151,11 @@ fn dyn_child_dyn(mut f: Box<dyn FnMut() -> Child>) -> View {
             let node = text(&first);
             let mut last = first;
             effect(move || {
-                if let Child::Text(s) = f() {
-                    if s != last {
-                        with_backend(|b| b.set_text(node, &s));
-                        last = s;
-                    }
+                if let Child::Text(s) = f()
+                    && s != last
+                {
+                    with_backend(|b| b.set_text(node, &s));
+                    last = s;
                 }
             });
             View::One(node)

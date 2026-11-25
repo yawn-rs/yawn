@@ -5,7 +5,6 @@ edition.workspace = true
 description = "End-to-end tests: .rsx fixtures are compiled by yawn-rsx at build time and rendered natively against an in-memory document"
 license.workspace = true
 repository.workspace = true
-homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true

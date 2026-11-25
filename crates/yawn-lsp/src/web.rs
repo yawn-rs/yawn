@@ -44,10 +44,10 @@ impl Web {
                     let (tx, rx) = unbounded();
                     std::thread::spawn(move || {
                         for line in BufReader::new(out).lines().map_while(Result::ok) {
-                            if let Ok(v) = serde_json::from_str::<Value>(&line) {
-                                if tx.send(v).is_err() {
-                                    break;
-                                }
+                            if let Ok(v) = serde_json::from_str::<Value>(&line)
+                                && tx.send(v).is_err()
+                            {
+                                break;
                             }
                         }
                     });

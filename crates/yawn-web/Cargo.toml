@@ -5,7 +5,6 @@ edition.workspace = true
 description = "Yawn framework core: project config, HTTP dev/production server (native) and DOM runtime (wasm)"
 license.workspace = true
 repository.workspace = true
-homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true

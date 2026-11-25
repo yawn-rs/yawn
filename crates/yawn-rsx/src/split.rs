@@ -51,12 +51,11 @@ impl Unit {
             out.push_str(&text);
             out.push('\n');
             // `name.rs` may have submodules in `name/`
-            if file.file_name().is_some_and(|n| n != "mod.rs") {
-                if let Some(dir) =
+            if file.file_name().is_some_and(|n| n != "mod.rs")
+                && let Some(dir) =
                     file.with_extension("").to_str().map(PathBuf::from).filter(|d| d.is_dir())
-                {
-                    walk(&dir, seen, out);
-                }
+            {
+                walk(&dir, seen, out);
             }
         }
         let mut out = String::new();
@@ -355,22 +354,21 @@ fn find_units(client: &str, modules: &str, rsx_dir: &Path) -> Vec<(Unit, bool, u
         if let (Some(rest), Some(name)) = (
             mlines[i].strip_prefix("#[path = \""),
             mlines[i + 1].strip_prefix("pub mod ").and_then(|r| r.strip_suffix(';')),
-        ) {
-            if let Some(path) = rest.strip_suffix("\"]") {
-                let file = PathBuf::from(path);
-                out.push((
-                    Unit {
-                        name: name.to_string(),
-                        attrs: String::new(),
-                        generated: file.starts_with(rsx_dir),
-                        file,
-                    },
-                    false,
-                    i,
-                ));
-                i += 2;
-                continue;
-            }
+        ) && let Some(path) = rest.strip_suffix("\"]")
+        {
+            let file = PathBuf::from(path);
+            out.push((
+                Unit {
+                    name: name.to_string(),
+                    attrs: String::new(),
+                    generated: file.starts_with(rsx_dir),
+                    file,
+                },
+                false,
+                i,
+            ));
+            i += 2;
+            continue;
         }
         i += 1;
     }

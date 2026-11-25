@@ -270,10 +270,10 @@ pub fn run(
     let tx_out = tx.clone();
     let t1 = std::thread::spawn(move || {
         for line in BufReader::new(out).lines().map_while(Result::ok) {
-            if let Some(p) = parse_json_line(&line) {
-                if tx_out.send(p).is_err() {
-                    break;
-                }
+            if let Some(p) = parse_json_line(&line)
+                && tx_out.send(p).is_err()
+            {
+                break;
             }
         }
     });

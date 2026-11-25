@@ -209,26 +209,26 @@ fn run(seed: u64, steps: usize) {
                     while k < doomed.len() {
                         let d = doomed[k];
                         for i in 0..cx.handles.len() {
-                            if cx.m.alive[i] && !doomed.contains(&i) {
-                                if let Some(f) = cx.m.formula[i] {
-                                    if f.base == d || f.gate == d {
-                                        doomed.push(i);
-                                    }
-                                }
+                            if cx.m.alive[i]
+                                && !doomed.contains(&i)
+                                && let Some(f) = cx.m.formula[i]
+                                && (f.base == d || f.gate == d)
+                            {
+                                doomed.push(i);
                             }
                         }
                         k += 1;
                     }
                     rt.batch(|rt| {
                         for i in 0..cx.handles.len() {
-                            if cx.m.alive[i] && !doomed.contains(&i) {
-                                if let Some(mut f) = cx.m.formula[i] {
-                                    if f.tgt.is_some_and(|t| doomed.contains(&t)) {
-                                        cx.tcells[i].set(None);
-                                        f.tgt = None;
-                                        cx.m.formula[i] = Some(f);
-                                    }
-                                }
+                            if cx.m.alive[i]
+                                && !doomed.contains(&i)
+                                && let Some(mut f) = cx.m.formula[i]
+                                && f.tgt.is_some_and(|t| doomed.contains(&t))
+                            {
+                                cx.tcells[i].set(None);
+                                f.tgt = None;
+                                cx.m.formula[i] = Some(f);
                             }
                         }
                         for (e, id, _) in &cx.effects {

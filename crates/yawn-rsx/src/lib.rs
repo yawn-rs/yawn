@@ -58,14 +58,10 @@ pub fn compile_with(
     let (rust, map) = codegen::generate(source, &file, path, known)?;
     let mut css = String::new();
     for item in &file.items {
-        if let ast::Item::Component(c) = item {
-            if let Some(span) = &c.style {
-                css.push_str(&format!(
-                    "/* {path}: {} */\n{}\n",
-                    c.name,
-                    source[span.clone()].trim()
-                ));
-            }
+        if let ast::Item::Component(c) = item
+            && let Some(span) = &c.style
+        {
+            css.push_str(&format!("/* {path}: {} */\n{}\n", c.name, source[span.clone()].trim()));
         }
     }
     Ok(Compiled { rust, map, css })

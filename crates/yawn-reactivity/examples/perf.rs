@@ -88,10 +88,10 @@ fn main() {
     let csv_path = std::env::args().find(|a| a.ends_with(".csv"));
     let mut rows: Vec<(String, f64, &'static str)> = vec![];
     let mut run = |name: &str, unit: &'static str, f: &mut dyn FnMut() -> f64| {
-        if let Some(o) = &only {
-            if !name.contains(o.as_str()) {
-                return;
-            }
+        if let Some(o) = &only
+            && !name.contains(o.as_str())
+        {
+            return;
         }
         let v = f();
         println!("{name:<28} {v:>14.1} {unit}");
@@ -351,10 +351,10 @@ fn main() {
     let mem = |name: &str,
                rows: &mut Vec<(String, f64, &'static str)>,
                build: &mut dyn FnMut(&mut Runtime, usize)| {
-        if let Some(o) = &only {
-            if !name.contains(o.as_str()) {
-                return;
-            }
+        if let Some(o) = &only
+            && !name.contains(o.as_str())
+        {
+            return;
         }
         let n = 100_000usize;
         let before = LIVE.load(Relaxed);

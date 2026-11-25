@@ -494,21 +494,19 @@ impl Server {
             return self.respond(r.id, serde_json::to_value(edits).unwrap_or(Value::Null));
         }
         trace!("{} at {}:{} in {:?}", r.method, pos.line + 1, pos.character + 1, ctx);
-        if let (Ctx::Attr { tag, start }, "textDocument/hover") = (&ctx, r.method.as_str()) {
-            if tag.starts_with(|c: char| c.is_uppercase())
-                && self.prop_hover(&uri, &r, tag, *start, pos)
-            {
-                return;
-            }
+        if let (Ctx::Attr { tag, start }, "textDocument/hover") = (&ctx, r.method.as_str())
+            && tag.starts_with(|c: char| c.is_uppercase())
+            && self.prop_hover(&uri, &r, tag, *start, pos)
+        {
+            return;
         }
-        if let Ctx::Attr { tag, start } = &ctx {
-            if r.method == "textDocument/completion"
-                && tag.starts_with(|c: char| c.is_uppercase())
-                && self.index.find(tag).is_none()
-                && self.props_via_ra(&uri, &r, *start, offset)
-            {
-                return;
-            }
+        if let Ctx::Attr { tag, start } = &ctx
+            && r.method == "textDocument/completion"
+            && tag.starts_with(|c: char| c.is_uppercase())
+            && self.index.find(tag).is_none()
+            && self.props_via_ra(&uri, &r, *start, offset)
+        {
+            return;
         }
         let Some(doc) = self.docs.get(&uri) else {
             return self.respond(r.id, Value::Null);
@@ -642,10 +640,10 @@ impl Server {
 
     fn hover_non_rust(&mut self, ctx: &Ctx, src: &str, pos: Position, offset: usize) -> Value {
         // a component in an opening or closing tag: its signature and the doc comment above it
-        if let Some(name) = component_name_at(src, offset) {
-            if let Some(h) = self.index.find(&name) {
-                return component_hover(h);
-            }
+        if let Some(name) = component_name_at(src, offset)
+            && let Some(h) = self.index.find(&name)
+        {
+            return component_hover(h);
         }
         let (op, text) = match ctx {
             Ctx::Css { .. } => ("cssHover", mask::css(src)),
@@ -813,12 +811,12 @@ impl Server {
 
     fn open(&mut self, uri: Url, text: String) {
         let root = uri.to_file_path().ok().and_then(|p| find_root(&p));
-        if let Some(root) = &root {
-            if self.compiled_roots.insert(root.clone()) {
-                // rust-analyzer needs the generated modules to exist on disk once.
-                let _ = project::compile_project(root);
-                self.index.scan(root);
-            }
+        if let Some(root) = &root
+            && self.compiled_roots.insert(root.clone())
+        {
+            // rust-analyzer needs the generated modules to exist on disk once.
+            let _ = project::compile_project(root);
+            self.index.scan(root);
         }
         if let Ok(p) = uri.to_file_path() {
             self.index.set(p, &text);
@@ -849,12 +847,12 @@ impl Server {
     }
 
     fn close(&mut self, uri: &Url) {
-        if let Some(doc) = self.docs.remove(uri) {
-            if let Some(g) = doc.r#gen {
-                self.gen_to_doc.remove(&g.uri);
-                // Back to the file on disk (kept current by didSave).
-                self.notify_ra("textDocument/didClose", json!({"textDocument": {"uri": g.uri}}));
-            }
+        if let Some(doc) = self.docs.remove(uri)
+            && let Some(g) = doc.r#gen
+        {
+            self.gen_to_doc.remove(&g.uri);
+            // Back to the file on disk (kept current by didSave).
+            self.notify_ra("textDocument/didClose", json!({"textDocument": {"uri": g.uri}}));
         }
         self.to_client(Message::Notification(Notification {
             method: "textDocument/publishDiagnostics".into(),
@@ -1233,16 +1231,16 @@ impl Server {
                 res
             }
             Pending::Hover(uri) => {
-                if let (Some(doc), Some(range)) = (self.docs.get(&uri), res.get("range").cloned()) {
-                    if let Some(g) = &doc.r#gen {
-                        match serde_json::from_value::<Range>(range)
-                            .ok()
-                            .and_then(|r| map_range(r, g, &doc.text))
-                        {
-                            Some(r) => res["range"] = json!(r),
-                            None => {
-                                res.as_object_mut().map(|o| o.remove("range"));
-                            }
+                if let (Some(doc), Some(range)) = (self.docs.get(&uri), res.get("range").cloned())
+                    && let Some(g) = &doc.r#gen
+                {
+                    match serde_json::from_value::<Range>(range)
+                        .ok()
+                        .and_then(|r| map_range(r, g, &doc.text))
+                    {
+                        Some(r) => res["range"] = json!(r),
+                        None => {
+                            res.as_object_mut().map(|o| o.remove("range"));
                         }
                     }
                 }
@@ -1360,11 +1358,10 @@ fn map_completion_item(item: &mut Value, g: &Gen, src: &Text) {
         for key in ["range", "insert", "replace"] {
             if let Some(r) =
                 edit.get(key).cloned().and_then(|r| serde_json::from_value::<Range>(r).ok())
+                && let Some(m) = map_range(r, g, src)
             {
-                if let Some(m) = map_range(r, g, src) {
-                    edit[key] = json!(m);
-                    ok = true;
-                }
+                edit[key] = json!(m);
+                ok = true;
             }
         }
         if ok {

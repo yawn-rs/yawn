@@ -5,7 +5,6 @@ edition.workspace = true
 description = "Single-threaded fine-grained reactivity core for Yawn: typed signals, memos, effects, scopes, generational handles"
 license.workspace = true
 repository.workspace = true
-homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true

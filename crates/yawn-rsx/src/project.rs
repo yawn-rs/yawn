@@ -41,10 +41,17 @@ fn server_mod(root: &Path) -> String {
     match server_file(root) {
         Some(f) => format!(
             "\n#[cfg(not(target_arch = \"wasm32\"))]\n#[path = {:?}]\npub mod server;\n",
-            f.to_string_lossy()
+            slashed(&f)
         ),
         None => String::new(),
     }
+}
+
+/// A path as written in a generated `#[path]`: forward slashes on every system, which Rust accepts on
+/// Windows too, so the generated code reads the same everywhere
+fn slashed(p: &Path) -> String {
+    let s = p.to_string_lossy();
+    if cfg!(windows) { s.replace('\\', "/") } else { s.into_owned() }
 }
 
 fn path_mod(root: &Path, line: &str) -> String {
@@ -62,7 +69,7 @@ fn path_mod_in(dir: &Path, line: &str) -> String {
     }
     for file in [dir.join(format!("{}.rs", name.trim())), dir.join(name.trim()).join("mod.rs")] {
         if file.is_file() {
-            return format!("#[path = {:?}] {line}", file.to_string_lossy());
+            return format!("#[path = {:?}] {line}", slashed(&file));
         }
     }
     line.to_string()
@@ -124,10 +131,11 @@ pub fn folders_enabled(root: &Path) -> bool {
 /// Name of the generated file (without `.rs`) for the `.rsx` file `stem` (below `src/`, no
 /// extension): the stem itself, except in `src/routes/` where `[id]` is `param_id` and so on
 pub fn generated_stem(root: &Path, stem: &str) -> String {
-    if stem.starts_with("routes/") && folders_enabled(root) {
-        if let Ok(r) = crate::routes::analyze(stem, "_") {
-            return r.module.join("/");
-        }
+    if stem.starts_with("routes/")
+        && folders_enabled(root)
+        && let Ok(r) = crate::routes::analyze(stem, "_")
+    {
+        return r.module.join("/");
     }
     stem.to_string()
 }
@@ -268,19 +276,19 @@ pub fn app_packages(root: &Path) -> Vec<String> {
     };
     let mut out: Vec<String> = Vec::new();
     for dir in libraries(root).into_iter().chain(source_crates(root)) {
-        if let Some(name) = crate::manifest::package_name(&dir).filter(|n| !framework(n)) {
-            if !out.contains(&name) {
-                out.push(name);
-            }
+        if let Some(name) = crate::manifest::package_name(&dir).filter(|n| !framework(n))
+            && !out.contains(&name)
+        {
+            out.push(name);
         }
     }
     // the generated members of a split project (`.yawn/crates/<dir>/Cargo.toml`)
     if let Ok(entries) = fs::read_dir(root.join(".yawn").join("crates")) {
         for entry in entries.flatten() {
-            if let Some(name) = crate::manifest::package_name(&entry.path()) {
-                if !out.contains(&name) {
-                    out.push(name);
-                }
+            if let Some(name) = crate::manifest::package_name(&entry.path())
+                && !out.contains(&name)
+            {
+                out.push(name);
             }
         }
     }
@@ -504,11 +512,11 @@ fn compile_own(root: &Path, split: bool) -> Result<Report, Vec<FileDiagnostic>> 
     }
     if !errors.is_empty() {
         // a project with errors still gets its crate root and manifest once; the split waits for a build that succeeds
-        if let Some(client) = &client_text {
-            if !root.join(CLIENT_ROOT).is_file() {
-                let _ = write_if_changed(&root.join(CLIENT_ROOT), client);
-                let _ = crate::manifest::write(root, router, &[]);
-            }
+        if let Some(client) = &client_text
+            && !root.join(CLIENT_ROOT).is_file()
+        {
+            let _ = write_if_changed(&root.join(CLIENT_ROOT), client);
+            let _ = crate::manifest::write(root, router, &[]);
         }
         return Err(errors);
     }
@@ -540,11 +548,11 @@ fn compile_own(root: &Path, split: bool) -> Result<Report, Vec<FileDiagnostic>> 
             text.push_str(&crate::routes::table(&route_files));
         }
     }
-    if let Ok(endpoints) = crate::api::scan(root) {
-        if !endpoints.is_empty() {
-            folder_files
-                .extend(crate::api::module_files(&out.join(crate::api::MODULE_DIR), &endpoints));
-        }
+    if let Ok(endpoints) = crate::api::scan(root)
+        && !endpoints.is_empty()
+    {
+        folder_files
+            .extend(crate::api::module_files(&out.join(crate::api::MODULE_DIR), &endpoints));
     }
     for (path, text) in folder_files {
         match write_if_changed(&path, &text) {
@@ -661,12 +669,12 @@ fn modules_file(
         files: &mut Vec<(PathBuf, String)>,
     ) {
         for (name, file) in &t.files {
-            text.push_str(&format!("#[path = {:?}]\npub mod {name};\n", file.to_string_lossy()));
+            text.push_str(&format!("#[path = {:?}]\npub mod {name};\n", slashed(file)));
         }
         for (name, sub) in &t.dirs {
             let sub_dir = dir.join(name);
             let mod_rs = sub_dir.join("mod.rs");
-            text.push_str(&format!("#[path = {:?}]\npub mod {name};\n", mod_rs.to_string_lossy()));
+            text.push_str(&format!("#[path = {:?}]\npub mod {name};\n", slashed(&mod_rs)));
             let mut sub_text =
                 String::from("// @generated by yawn-rsx: the modules of this folder.\n");
             // a folder that has plain Rust of its own (`src/<folder>/mod.rs`) keeps it: its `mod x;` lines point at the files next to it

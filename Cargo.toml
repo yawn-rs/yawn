@@ -10,7 +10,6 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.91"
 repository = "https://github.com/yawn-rs/yawn"
-homepage = "https://github.com/yawn-rs/yawn"
 keywords = ["web", "framework", "wasm", "reactive", "rsx"]
 categories = ["web-programming", "wasm", "gui"]
 
