@@ -25,6 +25,8 @@ struct State {
 
 #[cfg(target_arch = "wasm32")]
 const PRELOAD_WAIT_MS: i32 = 1500;
+/// How long the pointer rests on a [`Link`] before its page is prefetched
+const PREFETCH_HOVER_MS: i32 = 100;
 
 impl State {
     #[cfg(target_arch = "wasm32")]
@@ -197,7 +199,8 @@ impl Component for Outlet {
     }
 }
 
-/// A link that navigates without loading the page
+/// A link that navigates without loading the page. It also prefetches what the page reads: after
+/// the pointer rests on it for a moment, and at once on press or touch
 pub struct Link {
     /// Where it goes: `/users/3`, `/about?x=1`, or an outside URL
     pub href: String,
@@ -219,6 +222,14 @@ impl Component for Link {
             let nav = use_navigate();
             let location = use_location();
             let target = href.clone();
+            let hover = target.clone();
+            rt::listen(a, "mouseenter", move |_: Event| {
+                nav.prefetch(&hover, Some(PREFETCH_HOVER_MS))
+            });
+            let press = target.clone();
+            rt::listen(a, "mousedown", move |_: Event| nav.prefetch(&press, None));
+            let touch = target.clone();
+            rt::listen(a, "touchstart", move |_: Event| nav.prefetch(&touch, None));
             rt::listen(a, "click", move |e: Event| {
                 if e.modified {
                     return;
