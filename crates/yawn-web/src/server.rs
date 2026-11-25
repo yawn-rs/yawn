@@ -244,6 +244,7 @@ impl App {
                 .iter()
                 .map(|u| resolve(u))
                 .collect(),
+            scripts: config.project.app.scripts.iter().map(|u| resolve(u)).collect(),
             entry: resolve("/pkg/app.js"),
             assets: manifest.as_ref().map(|m| m.to_json()),
         };
@@ -403,6 +404,8 @@ async fn race<A: std::future::Future, B: std::future::Future>(a: A, b: B) -> Opt
 pub struct Document {
     pub title: String,
     pub stylesheets: Vec<String>,
+    /// Scripts that run once the page is parsed, before the client starts
+    pub scripts: Vec<String>,
     /// Module that initialises the WASM client
     pub entry: String,
     /// The asset manifest as JSON, for the client to resolve paths it builds (production only)
@@ -445,6 +448,9 @@ impl Document {
             s.push_str(&p.html);
         }
         s.push_str("</div>\n");
+        for src in &self.scripts {
+            s.push_str(&format!("<script src=\"{}\"></script>\n", escape_html(src)));
+        }
         if let Some(boot) = dev {
             let error = boot.error.as_deref().map_or("null".to_string(), json_string);
             let progress = boot.progress.as_ref().map_or("null".to_string(), |(d, t, l)| {
@@ -708,9 +714,17 @@ mod tests {
         Document {
             title: "A & <B>".into(),
             stylesheets: vec!["/assets/style.css".into()],
+            scripts: vec!["/assets/site.js".into()],
             entry: "/pkg/app.js".into(),
             assets: None,
         }
+    }
+
+    #[test]
+    fn document_runs_scripts_before_the_client_starts() {
+        let h = doc().render(None);
+        let script = h.find("<script src=\"/assets/site.js\"></script>").unwrap();
+        assert!(h.find("</div>").unwrap() < script);
     }
 
     #[test]

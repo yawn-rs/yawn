@@ -61,6 +61,8 @@ pub struct AppSection {
     pub title: Option<String>,
     /// Stylesheet URLs linked from the shell
     pub stylesheets: Option<Vec<String>>,
+    /// Script URLs added at the end of the page body, in this order
+    pub scripts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
