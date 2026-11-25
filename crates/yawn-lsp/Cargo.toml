@@ -19,7 +19,7 @@ path = "src/main.rs"
 yawn-rsx.workspace = true
 yawn-web = { workspace = true, features = ["config"] }
 lsp-server = "0.7"
-lsp-types = "0.94"
+lsp-types = "0.97"
 crossbeam-channel = "0.5"
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
