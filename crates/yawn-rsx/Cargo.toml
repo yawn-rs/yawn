@@ -11,6 +11,6 @@ categories.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-toml = "0.8"
+toml = "1.2"
 proc-macro2 = { version = "1", features = ["span-locations"] }
 syn = { version = "2", default-features = false, features = ["full", "parsing", "clone-impls"] }
