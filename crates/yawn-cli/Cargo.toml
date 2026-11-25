@@ -32,7 +32,7 @@ yawn-web = { workspace = true, features = ["config"] }
 yawn-rsx.workspace = true
 notify = "8"
 serde_json = "1"
-syn = { version = "2", features = ["full", "visit-mut"] }
+syn = { version = "3", features = ["full", "visit-mut"] }
 quote = "1"
 
 [target."cfg(unix)".dependencies]
