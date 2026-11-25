@@ -46,7 +46,7 @@ jobs:
           else
             tar -czf "$name.tar.gz" -C "$out" yawn
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: yawn-cli-${{ matrix.target }}
           path: yawn-cli-*
