@@ -65,3 +65,50 @@ pub(crate) fn server_literal(kind: &str, value: &'static str) -> &'static str {
     };
     table.values.get(&format!("{kind}:{value}")).copied().unwrap_or(value)
 }
+
+static NATIVE: Mutex<(Option<SystemTime>, Vec<String>)> = Mutex::new((None, Vec::new()));
+
+/// Loads the route libraries `yawn dev` built since the last request (`native.json` in
+/// `YAWN_DEV_DIR`). A library registers the component bodies it holds when it is loaded (see
+/// `yawn::dynamic`), so the server serves the new code without restarting.
+#[cfg(unix)]
+pub(crate) fn refresh_native() {
+    if !std::env::var("YAWN_DEV").is_ok_and(|v| v != "0") {
+        return;
+    }
+    let Ok(dir) = std::env::var("YAWN_DEV_DIR") else { return };
+    let path = PathBuf::from(dir).join("native.json");
+    let Some(stamp) = std::fs::metadata(&path).and_then(|m| m.modified()).ok() else { return };
+    let mut state = NATIVE.lock().unwrap_or_else(|e| e.into_inner());
+    if state.0 == Some(stamp) {
+        return;
+    }
+    state.0 = Some(stamp);
+    let Some(list) = std::fs::read(&path)
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Vec<String>>(&b).ok())
+    else {
+        return;
+    };
+    for file in list {
+        if state.1.contains(&file) {
+            continue;
+        }
+        let Ok(c) = std::ffi::CString::new(file.clone()) else { continue };
+        // the handle is never closed: bodies the library registered may still be running
+        let handle = unsafe { libc::dlopen(c.as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL) };
+        if handle.is_null() {
+            let err = unsafe { libc::dlerror() };
+            let why = if err.is_null() {
+                String::new()
+            } else {
+                unsafe { std::ffi::CStr::from_ptr(err) }.to_string_lossy().into_owned()
+            };
+            eprintln!("yawn: could not load {file}: {why}");
+        }
+        state.1.push(file);
+    }
+}
+
+#[cfg(not(unix))]
+pub(crate) fn refresh_native() {}

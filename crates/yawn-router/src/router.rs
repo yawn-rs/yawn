@@ -51,6 +51,9 @@ impl State {
         let mut names = Vec::new();
         for (depth, id) in target.chain.iter().enumerate() {
             let unchanged = current.chain.get(depth) == Some(id) && current.params == target.params;
+            if !unchanged {
+                yawn::dom::split_load(self.arena.nodes[*id].key, || {});
+            }
             let Some(preload) = self.arena.nodes[*id].preload else {
                 continue;
             };
@@ -150,6 +153,8 @@ pub fn render_with(routes: Routes, history: Rc<dyn History>) -> View {
         // the server: what the matched routes need is asked for before any of them is built
         let chain = ui::untracked(st_matched_chain);
         let arena = state().arena.clone();
+        let keys: Vec<&str> = chain.iter().map(|id| arena.nodes[*id].key).collect();
+        yawn::ui::head::meta("yawn-routes", &keys.join("|"));
         let aimed = Target { params: Params(state().matched), query: Query(state().location) };
         for id in chain {
             if let Some(preload) = arena.nodes[id].preload {

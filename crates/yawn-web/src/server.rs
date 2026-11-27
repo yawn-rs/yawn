@@ -268,8 +268,8 @@ impl App {
         };
 
         let mut internal = Router::<Shared>::new()
-            .nest_service("/pkg", ServeDir::new(pkg_dir))
-            .nest_service("/assets", ServeDir::new(assets_dir))
+            .nest_service("/pkg", ServeDir::new(&pkg_dir).precompressed_br())
+            .nest_service("/assets", ServeDir::new(assets_dir).precompressed_br())
             .fallback(shell);
         if hub.is_some() {
             let literals = config.dev_dir.join("literals.json");
@@ -294,10 +294,11 @@ impl App {
         // fastest level, the default takes ~250 ms on every reload
         let level =
             if hub.is_some() { CompressionLevel::Fastest } else { CompressionLevel::Default };
-        let mut router = self
-            .router
-            .merge(internal.with_state(shared))
-            .layer(CompressionLayer::new().quality(level));
+        let mut router = self.router.merge(internal.with_state(shared));
+        if let Some(dict) = (hub.is_none()).then(|| Dictionary::load(&pkg_dir)).flatten() {
+            router = router.layer(middleware::from_fn_with_state(dict, dictionary));
+        }
+        router = router.layer(CompressionLayer::new().quality(level));
         if hub.is_some() {
             router = router
                 .layer(middleware::from_fn(log_requests))
@@ -618,6 +619,7 @@ async fn shell(State(s): State<Shared>, uri: Uri, headers: HeaderMap) -> Respons
             match tokio::task::spawn_blocking(move || {
                 if dev {
                     crate::dev::refresh_literals();
+                    crate::dev::refresh_native();
                 }
                 render(request)
             })
@@ -666,6 +668,109 @@ async fn loaded(Query(q): Query<HashMap<String, String>>) -> StatusCode {
     StatusCode::NO_CONTENT
 }
 
+/// Dictionary-coded files. A route chunk built against the main module (`chunk_N.<hash>.wasm.dcz`)
+/// goes to browsers that announce the main module as a dictionary, and a file built against an
+/// earlier build of itself (`name.from-<sha256>.dcz`) to browsers that hold that build, which turns
+/// a deploy into a small diff
+struct Dictionary {
+    pkg: PathBuf,
+    id: String,
+    deltas: HashMap<(String, String), PathBuf>,
+}
+
+fn base64(bytes: &[u8]) -> String {
+    const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::from(":");
+    for c in bytes.chunks(3) {
+        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+        for i in 0..4 {
+            if i <= c.len() {
+                out.push(ABC[(n >> (18 - 6 * i) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out.push(':');
+    out
+}
+
+impl Dictionary {
+    fn load(pkg: &std::path::Path) -> Option<Arc<Self>> {
+        use sha2::{Digest, Sha256};
+        let mut any = false;
+        let mut deltas = HashMap::new();
+        for e in std::fs::read_dir(pkg).ok()?.flatten() {
+            let file = e.file_name().to_string_lossy().into_owned();
+            any |= file.ends_with(".wasm.dcz");
+            if let Some((name, rest)) = file.split_once(".from-")
+                && let Some(hex) = rest.strip_suffix(".dcz")
+                && hex.len() == 64
+                && let Some(sha) = (0..32).map(|i| u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).ok()).collect::<Option<Vec<u8>>>()
+            {
+                deltas.insert((name.to_string(), base64(&sha)), e.path());
+                any = true;
+            }
+        }
+        if !any {
+            return None;
+        }
+        let id = base64(&Sha256::digest(std::fs::read(pkg.join("app_bg.wasm")).ok()?));
+        Some(Arc::new(Self { pkg: pkg.to_path_buf(), id, deltas }))
+    }
+}
+
+async fn dictionary(State(dict): State<Arc<Dictionary>>, req: Request, next: Next) -> Response {
+    let path = req.uri().path().to_string();
+    let name = path.strip_prefix("/pkg/").filter(|n| n.ends_with(".wasm") && n.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'.'));
+    let chunk = name.is_some_and(|n| n.starts_with("chunk_"));
+    let main = name.is_some_and(|n| n.starts_with("app_bg."));
+    if let Some(name) = name.filter(|_| chunk || main) {
+        let (accepts, available) = {
+            let get = |n: &str| req.headers().get(n).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+            (get("accept-encoding").split(',').any(|e| e.trim().starts_with("dcz")), get("available-dictionary"))
+        };
+        if accepts {
+            let file = dict
+                .deltas
+                .get(&(name.to_string(), available.clone()))
+                .cloned()
+                .or_else(|| (chunk && available == dict.id).then(|| dict.pkg.join(format!("{name}.dcz"))));
+            if let Some(file) = file
+                && let Ok(body) = tokio::fs::read(file).await
+            {
+                let mut res = Response::new(axum::body::Body::from(body));
+                let h = res.headers_mut();
+                h.insert(header::CONTENT_TYPE, HeaderValue::from_static("application/wasm"));
+                h.insert(header::CONTENT_ENCODING, HeaderValue::from_static("dcz"));
+                h.insert(header::VARY, HeaderValue::from_static("Accept-Encoding, Available-Dictionary"));
+                announce(&mut res, name);
+                return res;
+            }
+        }
+    }
+    let mut res = next.run(req).await;
+    if let Some(name) = name.filter(|_| chunk || main) {
+        res.headers_mut().append(header::VARY, HeaderValue::from_static("Available-Dictionary"));
+        if res.status().is_success() {
+            announce(&mut res, name);
+        }
+    }
+    res
+}
+
+/// Marks a file as the dictionary for later builds of itself. A chunk is matched by its number, the
+/// main module also covers the chunks that have no earlier build of their own
+fn announce(res: &mut Response, name: &str) {
+    let pattern = match name.split_once('.') {
+        Some((stem, _)) if stem.starts_with("chunk_") => format!("/pkg/{stem}.*.wasm"),
+        _ => "/pkg/*.wasm".to_string(),
+    };
+    if let Ok(v) = HeaderValue::from_str(&format!("match=\"{pattern}\"")) {
+        res.headers_mut().insert("use-as-dictionary", v);
+    }
+}
+
 async fn production_cache(req: Request, next: Next) -> Response {
     let path = req.uri().path().to_string();
     let mut res = next.run(req).await;
@@ -681,12 +786,8 @@ async fn production_cache(req: Request, next: Next) -> Response {
 }
 
 async fn development_cache(req: Request, next: Next) -> Response {
-    let path = req.uri().path();
-    let value = if path.starts_with("/pkg/") || path.starts_with("/assets/") {
-        "no-cache"
-    } else {
-        "no-store"
-    };
+    let versioned = req.uri().path().starts_with("/pkg/") && req.uri().query().is_some_and(|q| q.starts_with("v="));
+    let value = if versioned { "public, max-age=31536000, immutable" } else { "no-store" };
     let mut res = next.run(req).await;
     res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static(value));
     res

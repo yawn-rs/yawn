@@ -269,7 +269,11 @@ impl<F: FnMut(Event) + 'static> IntoHandler<WithEvent> for F {
 
 /// Adds an event listener that's removed when the owner (component, branch, row) is disposed
 pub fn listen<M>(node: NodeId, event: &str, handler: impl IntoHandler<M>) {
-    let mut h = handler.into_handler();
+    listen_dyn(node, event, handler.into_handler());
+}
+
+#[inline(never)]
+fn listen_dyn(node: NodeId, event: &str, mut h: Box<dyn FnMut(Event)>) {
     let owner = ambient::capture_owner();
     let wrapped: Handler = Rc::new(RefCell::new(move |ev: Event| {
         ambient::run_in_owner(owner, || batch(|| h(ev)));
@@ -382,16 +386,64 @@ struct List {
     rows: Vec<Row>,
 }
 
+/// What the list core needs from the typed side; the rest of the list machinery is not generic
+trait Rows {
+    /// Reads the items, subscribing to what they read
+    fn fetch(&mut self);
+    fn keys(&self) -> Vec<KeyId>;
+    fn build(&mut self, i: usize) -> View;
+}
+
+struct Typed<T, K, Kf, I, R> {
+    items: I,
+    key: Kf,
+    row: R,
+    slots: Vec<Option<T>>,
+    marker: std::marker::PhantomData<fn() -> K>,
+}
+
+impl<T, K, Kf, I, R> Rows for Typed<T, K, Kf, I, R>
+where
+    T: 'static,
+    K: Hash + 'static,
+    Kf: Fn(&T) -> K,
+    I: FnMut() -> Vec<T>,
+    R: FnMut(T) -> View,
+{
+    fn fetch(&mut self) {
+        self.slots = (self.items)().into_iter().map(Some).collect();
+    }
+
+    fn keys(&self) -> Vec<KeyId> {
+        self.slots.iter().flatten().map(|t| key_id(&(self.key)(t))).collect()
+    }
+
+    fn build(&mut self, i: usize) -> View {
+        (self.row)(self.slots[i].take().expect("row built once"))
+    }
+}
+
 /// Keyed list
 pub fn each<T, K>(
-    mut items: impl FnMut() -> Vec<T> + 'static,
+    items: impl FnMut() -> Vec<T> + 'static,
     key: impl Fn(&T) -> K + 'static,
-    mut row: impl FnMut(T) -> View + 'static,
+    row: impl FnMut(T) -> View + 'static,
 ) -> View
 where
     T: 'static,
     K: Hash + 'static,
 {
+    each_core(Box::new(Typed {
+        items,
+        key,
+        row,
+        slots: Vec::new(),
+        marker: std::marker::PhantomData,
+    }))
+}
+
+#[inline(never)]
+fn each_core(mut rows: Box<dyn Rows>) -> View {
     let start = comment();
     let end = comment();
     // Rows live in a scope owned by the surrounding build: they must
@@ -402,20 +454,13 @@ where
     let first_nodes = initial.clone();
     let mut first = true;
     effect(move || {
-        let new_items = items();
+        rows.fetch();
         untracked(|| {
-            let keys: Vec<KeyId> = new_items.iter().map(|t| key_id(&key(t))).collect();
-            let mut slots: Vec<Option<T>> = new_items.into_iter().map(Some).collect();
+            let keys = rows.keys();
             let placed = reconcile(
                 &mut list,
                 &keys,
-                &mut |i| {
-                    build_row(
-                        keys[i],
-                        &mut || row(slots[i].take().expect("row built once")),
-                        list_scope,
-                    )
-                },
+                &mut |i| build_row(keys[i], &mut || rows.build(i), list_scope),
                 end,
                 first,
             );

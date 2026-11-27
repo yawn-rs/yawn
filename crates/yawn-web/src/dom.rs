@@ -622,6 +622,27 @@ pub fn with_view_transition(update: impl FnOnce() + 'static) {
 }
 
 #[wasm_bindgen(
+    inline_js = "export function splitReady(key) { const s = globalThis.__yawnSplit; return !s || s.ready(key); } export function splitLoad(key, done) { const s = globalThis.__yawnSplit; if (!s) { done(); return; } s.load(key).then(done, done); }"
+)]
+extern "C" {
+    #[wasm_bindgen(js_name = splitReady)]
+    fn split_ready_js(key: &str) -> bool;
+    #[wasm_bindgen(js_name = splitLoad)]
+    fn split_load_js(key: &str, done: &JsValue);
+}
+
+/// Whether the code of the route component named `key` (its `type_name`) is loaded: always, unless
+/// the build split the wasm into route modules
+pub fn split_ready(key: &str) -> bool {
+    split_ready_js(key)
+}
+
+/// Loads the module of the route named `key`, then calls `done`
+pub fn split_load(key: &str, done: impl FnOnce() + 'static) {
+    split_load_js(key, &Closure::once_into_js(done));
+}
+
+#[wasm_bindgen(
     inline_js = "export function scrollNearest(el) { if (el.scrollIntoView) el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }"
 )]
 extern "C" {

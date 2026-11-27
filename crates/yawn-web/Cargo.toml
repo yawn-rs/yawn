@@ -10,19 +10,14 @@ categories.workspace = true
 rust-version.workspace = true
 
 [lib]
-# crates.io has no free `yawn`; the package is `yawn-web`, code says `yawn::`.
 name = "yawn"
 
 [features]
 default = ["server"]
-# Typed data loaders (`yawn::data::Loader<T>`).
 json = ["dep:serde", "dep:serde_json"]
-# Project configuration (Yawn.toml) and port resolution. Small; also used by the CLI.
 config = ["dep:serde", "dep:toml"]
-# HTTP server for native targets. Inactive on wasm32 even when enabled.
-# HTTP client (`yawn::http`), the same API on the server and in the browser.
 http = ["dep:serde", "dep:serde_json", "dep:form_urlencoded", "dep:hyper", "dep:hyper-util", "dep:http-body-util", "dep:hyper-rustls", "dep:rustls", "dep:webpki-roots", "dep:tokio"]
-server = ["config", "dep:axum", "dep:hyper", "dep:hyper-util", "dep:tokio", "dep:tokio-stream", "dep:tower-http", "dep:serde_json"]
+server = ["config", "dep:axum", "dep:hyper", "dep:hyper-util", "dep:tokio", "dep:tokio-stream", "dep:tower-http", "dep:serde_json", "dep:libc", "dep:sha2"]
 
 [dependencies]
 yawn-reactivity.workspace = true
@@ -32,7 +27,6 @@ serde_json = { version = "1", optional = true }
 form_urlencoded = { version = "1", optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-# Only the server, CLI and LSP read Yawn.toml; the browser build never pulls the parser in.
 toml = { version = "0.8", optional = true }
 hyper = { version = "1", optional = true, default-features = false, features = ["client", "server", "http1"] }
 hyper-util = { version = "0.1", optional = true, default-features = false, features = ["client-legacy", "http1", "tokio", "service"] }
@@ -40,14 +34,14 @@ http-body-util = { version = "0.1", optional = true }
 hyper-rustls = { version = "0.27", optional = true, default-features = false, features = ["http1", "ring", "tls12"] }
 rustls = { version = "0.23", optional = true, default-features = false, features = ["ring", "std", "tls12"] }
 webpki-roots = { version = "1", optional = true }
-# No `tokio` feature: it would switch on tokio's `macros`, whose proc-macro build holds up tokio itself
-# on the critical path of a cold build. `server::serve` below replaces `axum::serve`.
 axum = { version = "0.8", optional = true, default-features = false, features = ["http1", "query"] }
 tokio = { version = "1", optional = true, features = ["rt-multi-thread", "net", "io-util", "io-std", "sync", "time", "signal"] }
 tokio-stream = { version = "0.1", optional = true, features = ["sync", "time"] }
+sha2 = { version = "0.10", optional = true }
 tower-http = { version = "0.6", optional = true, features = ["fs", "set-header", "compression-gzip", "compression-br"] }
 
+[target.'cfg(unix)'.dependencies]
+libc = { version = "0.2", optional = true }
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-# `enable-interning`: names the renderer passes to the DOM again and again (tags, attributes, events)
-# are turned into JavaScript strings once instead of being decoded from wasm memory on every call.
 wasm-bindgen = { version = "=0.2.129", features = ["enable-interning"] }

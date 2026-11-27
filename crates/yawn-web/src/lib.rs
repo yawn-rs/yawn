@@ -48,6 +48,9 @@ pub mod browser;
 /// Fine-grained UI runtime for `.rsx` components (target independent)
 pub mod ui;
 
+#[doc(hidden)]
+pub mod dynamic;
+
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
 pub mod dev;
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]

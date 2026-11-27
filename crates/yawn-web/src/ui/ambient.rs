@@ -34,8 +34,16 @@ pub fn is_active() -> bool {
 /// effects and event handlers) or when called from inside another `with` closure
 #[track_caller]
 pub fn with<R>(f: impl FnOnce(&mut Runtime) -> R) -> R {
+    let (mut f, mut out) = (Some(f), None);
+    with_dyn(&mut |rt| out = Some((f.take().expect("runs once"))(rt)));
+    out.expect("ran")
+}
+
+#[inline(never)]
+#[track_caller]
+fn with_dyn(f: &mut dyn FnMut(&mut Runtime)) {
     let mut taken = take();
-    f(taken.runtime())
+    f(taken.runtime());
 }
 
 struct Taken(*mut Runtime);
@@ -90,11 +98,19 @@ pub fn run_if_mounted<R>(f: impl FnOnce() -> R) -> Option<R> {
 /// Runs `f` with the runtime entered: from inside the runtime when already running, otherwise from
 /// the installed application runtime
 pub fn run<R>(f: impl FnOnce() -> R) -> R {
+    let (mut f, mut out) = (Some(f), None);
+    run_dyn(&mut || out = Some((f.take().expect("runs once"))()));
+    out.expect("ran")
+}
+
+#[inline(never)]
+fn run_dyn(f: &mut dyn FnMut()) {
     if is_active() {
-        return with(|rt| {
+        with_dyn(&mut |rt| {
             let _g = enter(rt);
             f()
         });
+        return;
     }
     ROOT.with(|cell| {
         let mut slot = cell.try_borrow_mut().expect("yawn: the runtime is already in use");
@@ -113,20 +129,31 @@ pub fn capture_owner() -> Option<Scope> {
 /// [`run_if_mounted`] inside `owner`, so the code is part of the component that asked for it: it
 /// can start work that ends with it and register cleanups
 pub fn run_in_owner<R>(owner: Option<Scope>, f: impl FnOnce() -> R) -> Option<R> {
+    let (mut f, mut out) = (Some(f), None);
+    run_in_owner_dyn(owner, &mut || out = Some((f.take().expect("runs once"))()));
+    out
+}
+
+#[inline(never)]
+fn run_in_owner_dyn(owner: Option<Scope>, f: &mut dyn FnMut()) {
     match owner {
-        None => run_if_mounted(f),
+        None => {
+            if is_mounted() {
+                run_dyn(f);
+            }
+        }
         Some(owner) => {
             if !is_mounted() {
-                return None;
+                return;
             }
-            run(|| {
-                with(|rt| {
-                    rt.run_in(owner, |rt| {
+            run_dyn(&mut || {
+                with_dyn(&mut |rt| {
+                    let _ = rt.run_in(owner, |rt| {
                         let _g = enter(rt);
                         f()
-                    })
+                    });
                 })
-            })
+            });
         }
     }
 }

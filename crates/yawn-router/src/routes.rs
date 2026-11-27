@@ -82,13 +82,38 @@ impl Pattern {
 type Build = Rc<dyn Fn() -> View>;
 type Params = Vec<(String, String)>;
 
+/// One function per route component, never inlined: it is the point where a build can cut a
+/// route's code out of the main module
+#[inline(never)]
+fn route_entry<C: Component + Default + 'static>() -> View {
+    C::default().render()
+}
+
+/// What the router calls to build a route: in a build that splits the wasm into route modules, a
+/// route whose module has not arrived yet shows nothing and appears when it has
+fn gated<C: Component + Default + 'static>() -> View {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let key = std::any::type_name::<C>();
+        if !yawn::dom::split_ready(key) {
+            let ready = yawn::ui::signal(false);
+            yawn::dom::split_load(key, move || yawn::ui::run(|| ready.set(true)));
+            return yawn::ui::rt::switch(
+                move || ready.get(),
+                move |loaded| if loaded { route_entry::<C>() } else { View::empty() },
+            );
+        }
+    }
+    route_entry::<C>()
+}
+
 fn builder<C: Component + Default + 'static>() -> Build {
-    Rc::new(|| C::default().render())
+    Rc::new(gated::<C>)
 }
 
 enum Entry {
-    Page { pattern: Pattern, build: Build, preload: Option<PreloadFn> },
-    Layout { pattern: Pattern, build: Build, children: Routes, preload: Option<PreloadFn> },
+    Page { pattern: Pattern, build: Build, key: &'static str, preload: Option<PreloadFn> },
+    Layout { pattern: Pattern, build: Build, key: &'static str, children: Routes, preload: Option<PreloadFn> },
 }
 
 /// A table of routes. Pages show for their path; a layout wraps the routes inside it and places
@@ -136,6 +161,7 @@ impl Routes {
         self.entries.push(Entry::Page {
             pattern: Pattern::parse(pattern),
             build: builder::<C>(),
+            key: std::any::type_name::<C>(),
             preload: None,
         });
         self
@@ -150,6 +176,7 @@ impl Routes {
         self.entries.push(Entry::Layout {
             pattern: Pattern::parse(pattern),
             build: builder::<C>(),
+            key: std::any::type_name::<C>(),
             children: inner(Routes::new()),
             preload: None,
         });
@@ -185,6 +212,8 @@ impl Routes {
 pub(crate) struct Node {
     pattern: Pattern,
     pub build: Build,
+    /// The component's `type_name`, which names its route module in a split build
+    pub key: &'static str,
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub preload: Option<PreloadFn>,
     children: Option<Vec<usize>>,
@@ -208,12 +237,12 @@ impl Arena {
         let mut ids = Vec::new();
         for e in routes.entries {
             let node = match e {
-                Entry::Page { pattern, build, preload } => {
-                    Node { pattern, build, preload, children: None }
+                Entry::Page { pattern, build, key, preload } => {
+                    Node { pattern, build, key, preload, children: None }
                 }
-                Entry::Layout { pattern, build, children, preload } => {
+                Entry::Layout { pattern, build, key, children, preload } => {
                     let kids = self.add_all(children);
-                    Node { pattern, build, preload, children: Some(kids) }
+                    Node { pattern, build, key, preload, children: Some(kids) }
                 }
             };
             self.nodes.push(node);

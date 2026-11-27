@@ -96,6 +96,10 @@ pub struct DevSection {
     /// only the crate it's in and what uses it (default: on; `yawn build` always builds one crate,
     /// which is a little smaller)
     pub split: Option<bool>,
+    /// Builds the app position-independent and a route edit as a small module the open page loads
+    /// instead of rebuilding the app (default: on; needs the `rust-src` component, without it the
+    /// app is rebuilt as usual)
+    pub dynamic: Option<bool>,
 }
 
 #[derive(Debug)]

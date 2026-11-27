@@ -224,6 +224,14 @@ fn effect_dyn(mut f: Box<dyn FnMut()>) {
 /// Defers effects until `f` returns, so several `set`s cause one update
 #[track_caller]
 pub fn batch<R>(f: impl FnOnce() -> R) -> R {
+    let (mut f, mut out) = (Some(f), None);
+    batch_dyn(&mut || out = Some((f.take().expect("runs once"))()));
+    out.expect("ran")
+}
+
+#[inline(never)]
+#[track_caller]
+fn batch_dyn(f: &mut dyn FnMut()) {
     with(|rt| {
         rt.batch(|rt| {
             let _g = enter(rt);

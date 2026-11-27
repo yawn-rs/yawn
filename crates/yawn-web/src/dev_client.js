@@ -13,16 +13,12 @@
     overlay.textContent = (title || 'yawn: build failed') + ' (click to hide)\n\n' + text;
   }
   if (boot.error) showError(boot.error);
-  // A panic leaves the runtime locked, so every later click fails with "the runtime is already in use". The first panic is the cause: keep it on screen.
   var crashed = false;
   window.__yawnPanic = function (text) { if (crashed) return; crashed = true; showError(text, 'yawn: the page crashed'); };
-  // Build progress: a thin bar across the top and what is compiling, while `yawn dev` builds.
-  // the signals' values outlive a reload of the page: saved by the client when the page is left, handed to the next one when it starts
   try {
     var kept = sessionStorage.getItem('__yawnKept');
     if (kept) { window.__yawnKept = kept; sessionStorage.removeItem('__yawnKept'); }
   } catch (e) {}
-  // only a reload the dev client makes itself keeps the values: one the person makes by hand starts the page clean
   function reloadKeeping() {
     try {
       var m = window.__yawnModule;
@@ -162,7 +158,6 @@
       literals = [];
       window.__yawnLiterals = loaded[2];
       window.__yawnBoot = Object.fromEntries(loaded[3]);
-      // the page is what the replaced client built, not what the server wrote: there is nothing to adopt
       window.__yawnReplaced = 1;
       await module.default({module_or_path: loaded[1]});
       window.__yawnModule = module;
@@ -215,8 +210,6 @@
     }).catch(function (error) { console.warn('yawn: hot update requires client replacement', error); setTimeout(function () { softReload(rev); }, 0); });
   }
   var seen = boot.rev, down = false;
-  // The event stream can stay open through a proxy while the server behind it is replaced, so the
-  // page also asks for the revision now and then; a different one means a reload was missed.
   function poll() {
     fetch('/__yawn/rev', { cache: 'no-store' }).then(function (r) { return r.ok ? r.text() : null; }).then(function (t) {
       if (t === null) { down = true; return; }
