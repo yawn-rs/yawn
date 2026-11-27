@@ -203,6 +203,39 @@ fn problem(path: &str, message: String) -> FileDiagnostic {
     }
 }
 
+/// What compiling one file gave, valid while its text and the components it may call stay the same
+#[derive(Clone)]
+struct CachedFile {
+    source: u64,
+    known: u64,
+    rust: String,
+    css: String,
+    map: String,
+}
+
+/// The files compiled earlier in this process: `yawn dev` compiles the whole project after every
+/// save, and almost every file is the same as the time before
+fn compiled_files() -> &'static std::sync::Mutex<BTreeMap<PathBuf, CachedFile>> {
+    static FILES: std::sync::OnceLock<std::sync::Mutex<BTreeMap<PathBuf, CachedFile>>> =
+        std::sync::OnceLock::new();
+    FILES.get_or_init(Default::default)
+}
+
+/// The component headers of the files read earlier, by file and text
+fn header_cache() -> &'static std::sync::Mutex<BTreeMap<PathBuf, (u64, Vec<(String, Vec<String>)>)>>
+{
+    type Headers = std::sync::Mutex<BTreeMap<PathBuf, (u64, Vec<(String, Vec<String>)>)>>;
+    static HEADERS: std::sync::OnceLock<Headers> = std::sync::OnceLock::new();
+    HEADERS.get_or_init(Default::default)
+}
+
+fn hash_of(text: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut h);
+    h.finish()
+}
+
 fn write_if_changed(path: &Path, content: &str) -> std::io::Result<bool> {
     if fs::read_to_string(path).is_ok_and(|old| old == content) {
         return Ok(false);
@@ -226,6 +259,16 @@ pub fn split_enabled(root: &Path) -> bool {
         .ok()
         .and_then(|t| t.parse::<toml::Table>().ok())
         .and_then(|t| t.get("dev")?.get("split")?.as_bool())
+        .unwrap_or(true)
+}
+
+/// Whether development lets a running page swap component bodies: on unless `Yawn.toml` has
+/// `[dev] dynamic = false` (see `yawn::dynamic`)
+pub fn dynamic_enabled(root: &Path) -> bool {
+    fs::read_to_string(root.join("Yawn.toml"))
+        .ok()
+        .and_then(|t| t.parse::<toml::Table>().ok())
+        .and_then(|t| t.get("dev")?.get("dynamic")?.as_bool())
         .unwrap_or(true)
 }
 
@@ -352,6 +395,8 @@ pub fn compile_project_with(root: &Path, split: bool) -> Result<Report, Vec<File
 }
 
 fn compile_own(root: &Path, split: bool) -> Result<Report, Vec<FileDiagnostic>> {
+    let dynamic = split && dynamic_enabled(root);
+    crate::codegen::set_dynamic(dynamic);
     let out = out_dir(root);
     let sources = find_sources(root);
     let mut errors = Vec::new();
@@ -374,18 +419,34 @@ fn compile_own(root: &Path, split: bool) -> Result<Report, Vec<FileDiagnostic>> 
     }
     for file in &header_files {
         if let Ok(text) = fs::read_to_string(file) {
-            for h in crate::parser::headers(&text) {
-                if !seen.insert(h.name.clone()) {
-                    twice.insert(h.name.clone());
+            let key = hash_of(&text);
+            let cached = header_cache()
+                .lock()
+                .ok()
+                .and_then(|c| c.get(file).filter(|(k, _)| *k == key).map(|(_, h)| h.clone()));
+            let headers = cached.unwrap_or_else(|| {
+                let found: Vec<(String, Vec<String>)> = crate::parser::headers(&text)
+                    .into_iter()
+                    .map(|h| (h.name, h.defaults))
+                    .collect();
+                if let Ok(mut c) = header_cache().lock() {
+                    c.insert(file.clone(), (key, found.clone()));
                 }
-                if !h.defaults.is_empty() {
-                    known.insert(h.name, h.defaults);
+                found
+            });
+            for (name, defaults) in headers {
+                if !seen.insert(name.clone()) {
+                    twice.insert(name.clone());
+                }
+                if !defaults.is_empty() {
+                    known.insert(name, defaults);
                 }
             }
         }
     }
     // two components of one name can't be told apart at a call site: leaving a prop out is an error there
     known.retain(|name, _| !twice.contains(name));
+    let known_key = hash_of(&format!("{known:?}{dynamic}"));
     let mut has_entry = false;
     let mut client_text: Option<String> = None;
     let mut router = false;
@@ -512,13 +573,37 @@ fn compile_own(root: &Path, split: bool) -> Result<Report, Vec<FileDiagnostic>> 
             ));
             continue;
         }
-        match crate::compile_with(&source, &display, &known) {
-            Ok(c) => {
-                css.push_str(&c.css);
+        let source_key = hash_of(&source);
+        let abs = root.join(&display);
+        let cached = compiled_files()
+            .lock()
+            .ok()
+            .and_then(|c| c.get(&abs).filter(|f| f.source == source_key && f.known == known_key).cloned());
+        let compiled = match cached {
+            Some(f) => Ok((f.rust, f.css, f.map)),
+            None => crate::compile_with(&source, &display, &known).map(|c| {
+                let map = SourceMap { source: display.clone(), ..c.map }.to_text();
+                if let Ok(mut files) = compiled_files().lock() {
+                    files.insert(
+                        abs.clone(),
+                        CachedFile {
+                            source: source_key,
+                            known: known_key,
+                            rust: c.rust.clone(),
+                            css: c.css.clone(),
+                            map: map.clone(),
+                        },
+                    );
+                }
+                (c.rust, c.css, map)
+            }),
+        };
+        match compiled {
+            Ok((rust, file_css, map_text)) => {
+                css.push_str(&file_css);
                 let gen_path = out.join(&rust_name);
                 let map_path = out.join(format!("{stem}.map"));
-                let map_text = SourceMap { source: display.clone(), ..c.map }.to_text();
-                let wrote = write_if_changed(&gen_path, &c.rust)
+                let wrote = write_if_changed(&gen_path, &rust)
                     .and_then(|a| write_if_changed(&map_path, &map_text).map(|b| a || b));
                 match wrote {
                     Ok(changed) => report.written += changed as usize,
@@ -578,6 +663,19 @@ fn compile_own(root: &Path, split: bool) -> Result<Report, Vec<FileDiagnostic>> 
         folder_files
             .extend(crate::api::module_files(&out.join(crate::api::MODULE_DIR), &endpoints));
     }
+    // one crate, or several (see `split`); before the module files are written, since the split
+    // rewrites some of them
+    let split = client_text
+        .as_ref()
+        .filter(|_| split)
+        .and_then(|c| crate::split::apply(root, c, &modules_rs, &folder_files));
+    if let Some(sp) = &split {
+        for (path, text) in &sp.folder_files {
+            if let Some(slot) = folder_files.iter_mut().find(|(p, _)| p == path) {
+                slot.1 = text.clone();
+            }
+        }
+    }
     for (path, text) in folder_files {
         match write_if_changed(&path, &text) {
             Ok(changed) => report.written += changed as usize,
@@ -590,11 +688,6 @@ fn compile_own(root: &Path, split: bool) -> Result<Report, Vec<FileDiagnostic>> 
         }
         keep.push(path);
     }
-    // one crate, or several (see `split`)
-    let split = client_text
-        .as_ref()
-        .filter(|_| split)
-        .and_then(|c| crate::split::apply(root, c, &modules_rs));
     let (modules_rs, members) = match &split {
         Some(sp) => (sp.modules.clone(), sp.members.clone()),
         None => (modules_rs, Vec::new()),

@@ -29,6 +29,7 @@ pub mod routes;
 pub mod scan;
 pub mod sourcemap;
 pub mod split;
+pub mod split_nodes;
 
 pub use diag::Diagnostic;
 pub use sourcemap::SourceMap;

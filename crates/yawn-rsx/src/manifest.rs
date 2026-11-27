@@ -194,7 +194,9 @@ fn finish_root(t: &mut Table, name: &str) {
     let mut lib = Table::new();
     lib.insert("name".into(), LIB_NAME.into());
     lib.insert("path".into(), "client.rs".into());
-    lib.insert("crate-type".into(), Value::Array(vec!["cdylib".into(), "rlib".into()]));
+    // The browser build asks for `cdylib` itself (`cargo rustc --crate-type cdylib`); listing it
+    // here would make every server build link a shared library nobody uses
+    lib.insert("crate-type".into(), Value::Array(vec!["rlib".into()]));
     t.insert("lib".into(), Value::Table(lib));
     let mut bin = Table::new();
     bin.insert("name".into(), name.into());

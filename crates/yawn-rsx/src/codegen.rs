@@ -183,10 +183,18 @@ impl Gen<'_> {
             w.raw("}\n\n");
         }
         w.raw("#[allow(unused_parens, unused_braces, unused_mut, clippy::all)]\n");
-        w.raw(&format!(
-            "impl ::yawn::ui::Component for {} {{\n    fn render(self) -> ::yawn::ui::View {{",
-            c.name
-        ));
+        let dynamic = dynamic();
+        if dynamic {
+            w.raw(&format!(
+                "impl {} {{\n    #[doc(hidden)]\n    pub fn __yawn_body(self) -> ::yawn::ui::View {{\n        {BODY_BEGIN}",
+                c.name
+            ));
+        } else {
+            w.raw(&format!(
+                "impl ::yawn::ui::Component for {} {{\n    fn render(self) -> ::yawn::ui::View {{",
+                c.name
+            ));
+        }
         w.indent = 2;
         if !c.params.is_empty() {
             w.nl();
@@ -201,12 +209,22 @@ impl Gen<'_> {
         self.children(&c.view, &format!("&mut {root}"))?;
         self.w.nl();
         self.w.raw(&format!("{root}.finish()"));
+        if dynamic {
+            self.w.nl();
+            self.w.raw(BODY_END);
+        }
         self.w.indent = 1;
         self.w.nl();
         self.w.raw("}");
         self.w.indent = 0;
         self.w.nl();
         self.w.raw("}\n");
+        if dynamic {
+            let name = &c.name;
+            self.w.raw(&format!(
+                "\n#[allow(unused_parens, unused_braces, unused_mut, clippy::all)]\nimpl {name} {{\n    #[doc(hidden)]\n    pub fn __yawn_register() {{\n        ::yawn::dynamic::register::<Self>(::core::any::type_name::<Self>(), Self::__yawn_body);\n    }}\n}}\n\n#[cfg(target_os = \"linux\")]\n#[allow(non_upper_case_globals)]\n#[used]\n#[unsafe(link_section = \".init_array\")]\nstatic __YAWN_REGISTER_{name}: extern \"C\" fn() = {{\n    extern \"C\" fn register() {{\n        {name}::__yawn_register();\n    }}\n    register\n}};\n\n#[cfg(target_os = \"macos\")]\n#[allow(non_upper_case_globals)]\n#[used]\n#[unsafe(link_section = \"__DATA,__mod_init_func\")]\nstatic __YAWN_REGISTER_MAC_{name}: extern \"C\" fn() = {{\n    extern \"C\" fn register() {{\n        {name}::__yawn_register();\n    }}\n    register\n}};\n\n#[allow(unused_parens, unused_braces, unused_mut, clippy::all)]\nimpl ::yawn::ui::Component for {name} {{\n    fn render(self) -> ::yawn::ui::View {{\n        match ::yawn::dynamic::entry::<Self>(::core::any::type_name::<Self>()) {{\n            Some(f) => f(self),\n            None => Self::__yawn_body(self),\n        }}\n    }}\n}}\n"
+            ));
+        }
         Ok(())
     }
 
@@ -1061,6 +1079,22 @@ impl Gen<'_> {
 struct Skeleton {
     html: String,
     paths: Vec<Vec<u8>>,
+}
+
+/// Marks the part of a generated component a running page can swap out (see `yawn::dynamic`)
+pub const BODY_BEGIN: &str = "// yawn:body-begin";
+pub const BODY_END: &str = "// yawn:body-end";
+
+static DYNAMIC: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Makes generated components render through `yawn::dynamic`, so a dev build can replace a
+/// component's body without rebuilding the app
+pub fn set_dynamic(on: bool) {
+    DYNAMIC.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn dynamic() -> bool {
+    DYNAMIC.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 fn yawn_void(name: &str) -> bool {
