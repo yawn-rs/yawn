@@ -1,0 +1,13 @@
+[package]
+name = "yawn-split"
+version.workspace = true
+edition.workspace = true
+description = "Splits a linked wasm module into a main module and lazily loaded route modules"
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+wasmparser = "0.244"
+rustc-demangle = "0.1"
+walrus = "0.24"
