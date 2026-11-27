@@ -682,7 +682,9 @@ fn base64(bytes: &[u8]) -> String {
     const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::from(":");
     for c in bytes.chunks(3) {
-        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+        let n = (c[0] as u32) << 16
+            | (*c.get(1).unwrap_or(&0) as u32) << 8
+            | *c.get(2).unwrap_or(&0) as u32;
         for i in 0..4 {
             if i <= c.len() {
                 out.push(ABC[(n >> (18 - 6 * i) & 63) as usize] as char);
@@ -706,7 +708,9 @@ impl Dictionary {
             if let Some((name, rest)) = file.split_once(".from-")
                 && let Some(hex) = rest.strip_suffix(".dcz")
                 && hex.len() == 64
-                && let Some(sha) = (0..32).map(|i| u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).ok()).collect::<Option<Vec<u8>>>()
+                && let Some(sha) = (0..32)
+                    .map(|i| u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).ok())
+                    .collect::<Option<Vec<u8>>>()
             {
                 deltas.insert((name.to_string(), base64(&sha)), e.path());
                 any = true;
@@ -722,20 +726,27 @@ impl Dictionary {
 
 async fn dictionary(State(dict): State<Arc<Dictionary>>, req: Request, next: Next) -> Response {
     let path = req.uri().path().to_string();
-    let name = path.strip_prefix("/pkg/").filter(|n| n.ends_with(".wasm") && n.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'.'));
+    let name = path.strip_prefix("/pkg/").filter(|n| {
+        n.ends_with(".wasm")
+            && n.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'.')
+    });
     let chunk = name.is_some_and(|n| n.starts_with("chunk_"));
     let main = name.is_some_and(|n| n.starts_with("app_bg."));
     if let Some(name) = name.filter(|_| chunk || main) {
         let (accepts, available) = {
-            let get = |n: &str| req.headers().get(n).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
-            (get("accept-encoding").split(',').any(|e| e.trim().starts_with("dcz")), get("available-dictionary"))
+            let get = |n: &str| {
+                req.headers().get(n).and_then(|v| v.to_str().ok()).unwrap_or("").to_string()
+            };
+            (
+                get("accept-encoding").split(',').any(|e| e.trim().starts_with("dcz")),
+                get("available-dictionary"),
+            )
         };
         if accepts {
-            let file = dict
-                .deltas
-                .get(&(name.to_string(), available.clone()))
-                .cloned()
-                .or_else(|| (chunk && available == dict.id).then(|| dict.pkg.join(format!("{name}.dcz"))));
+            let file =
+                dict.deltas.get(&(name.to_string(), available.clone())).cloned().or_else(|| {
+                    (chunk && available == dict.id).then(|| dict.pkg.join(format!("{name}.dcz")))
+                });
             if let Some(file) = file
                 && let Ok(body) = tokio::fs::read(file).await
             {
@@ -743,7 +754,10 @@ async fn dictionary(State(dict): State<Arc<Dictionary>>, req: Request, next: Nex
                 let h = res.headers_mut();
                 h.insert(header::CONTENT_TYPE, HeaderValue::from_static("application/wasm"));
                 h.insert(header::CONTENT_ENCODING, HeaderValue::from_static("dcz"));
-                h.insert(header::VARY, HeaderValue::from_static("Accept-Encoding, Available-Dictionary"));
+                h.insert(
+                    header::VARY,
+                    HeaderValue::from_static("Accept-Encoding, Available-Dictionary"),
+                );
                 announce(&mut res, name);
                 return res;
             }
@@ -786,7 +800,8 @@ async fn production_cache(req: Request, next: Next) -> Response {
 }
 
 async fn development_cache(req: Request, next: Next) -> Response {
-    let versioned = req.uri().path().starts_with("/pkg/") && req.uri().query().is_some_and(|q| q.starts_with("v="));
+    let versioned = req.uri().path().starts_with("/pkg/")
+        && req.uri().query().is_some_and(|q| q.starts_with("v="));
     let value = if versioned { "public, max-age=31536000, immutable" } else { "no-store" };
     let mut res = next.run(req).await;
     res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static(value));

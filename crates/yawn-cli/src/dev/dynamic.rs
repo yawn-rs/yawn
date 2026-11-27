@@ -185,9 +185,12 @@ impl Dynamic {
                     text.push('\n');
                 }
             }
-            let leaf = Leaf { dir: dir.clone(), package: yawn_rsx::manifest::member_package(&pkg, &dir) };
+            let leaf =
+                Leaf { dir: dir.clone(), package: yawn_rsx::manifest::member_package(&pkg, &dir) };
             for line in text.lines() {
-                if let Some(path) = line.strip_prefix("#[path = \"").and_then(|r| r.strip_suffix("\"]")) {
+                if let Some(path) =
+                    line.strip_prefix("#[path = \"").and_then(|r| r.strip_suffix("\"]"))
+                {
                     let path = PathBuf::from(path);
                     if path.file_name().is_some_and(|n| n == "mod.rs") {
                         if let Some(parent) = path.parent() {
@@ -204,7 +207,11 @@ impl Dynamic {
 
     fn crates(&self) -> Vec<Leaf> {
         let mut seen = BTreeSet::new();
-        self.owners().into_iter().map(|(_, _, l)| l).filter(|l| seen.insert(l.dir.clone())).collect()
+        self.owners()
+            .into_iter()
+            .map(|(_, _, l)| l)
+            .filter(|l| seen.insert(l.dir.clone()))
+            .collect()
     }
 
     /// Records the generated code the app was just built from
@@ -318,11 +325,7 @@ impl Dynamic {
         } else {
             cc.args(["-shared", "-Wl,-Bsymbolic", "-o"]);
         }
-        let linked = cc
-            .arg(&out)
-            .args(&objects)
-            .output()
-            .map_err(|e| fallback(&e.to_string()))?;
+        let linked = cc.arg(&out).args(&objects).output().map_err(|e| fallback(&e.to_string()))?;
         let _ = std::fs::remove_dir_all(&tmp);
         if !linked.status.success() {
             return Err(fallback(&String::from_utf8_lossy(&linked.stderr)));
@@ -336,8 +339,11 @@ impl Dynamic {
         self.native.push((leaf.dir.clone(), out));
         let list: Vec<String> =
             self.native.iter().map(|(_, p)| p.to_string_lossy().into_owned()).collect();
-        std::fs::write(dev_dir.join("native.json"), serde_json::to_string(&list).unwrap_or_default())
-            .map_err(|e| fallback(&e.to_string()))
+        std::fs::write(
+            dev_dir.join("native.json"),
+            serde_json::to_string(&list).unwrap_or_default(),
+        )
+        .map_err(|e| fallback(&e.to_string()))
     }
 
     fn dyn_dir(&self, dist: &Path) -> PathBuf {
@@ -367,10 +373,7 @@ impl Dynamic {
             let host = out(&["-vV"])?
                 .lines()
                 .find_map(|l| l.strip_prefix("host: ").map(str::to_string))?;
-            let lld = Path::new(sysroot.trim())
-                .join("lib/rustlib")
-                .join(host)
-                .join("bin/rust-lld");
+            let lld = Path::new(sysroot.trim()).join("lib/rustlib").join(host).join("bin/rust-lld");
             lld.is_file().then(|| self.lld = Some(lld))?;
         }
         self.lld.clone()
@@ -397,7 +400,8 @@ impl Dynamic {
         while i < rec.argv.len() {
             let a = rec.argv[i].as_str();
             let next = rec.argv.get(i + 1).map(String::as_str).unwrap_or("");
-            if a == "--emit" || a == "--out-dir" || (a == "-C" && next.starts_with("incremental=")) {
+            if a == "--emit" || a == "--out-dir" || (a == "-C" && next.starts_with("incremental="))
+            {
                 i += 2;
                 continue;
             }
@@ -408,7 +412,11 @@ impl Dynamic {
             argv.push(rec.argv[i].clone());
             i += 1;
         }
-        argv.extend(["--emit=link".into(), "--out-dir".into(), work.to_string_lossy().into_owned()]);
+        argv.extend([
+            "--emit=link".into(),
+            "--out-dir".into(),
+            work.to_string_lossy().into_owned(),
+        ]);
         argv.extend(["-C".into(), "relocation-model=pic".into()]);
         let incr = self.dev_dir.join("dyn-incr").join(&leaf.dir);
         argv.extend(["-C".into(), format!("incremental={}", incr.display())]);
@@ -466,16 +474,23 @@ impl Dynamic {
             .into_iter()
             .collect();
         let glue = std::fs::read_to_string(dist.join("pkg").join("app.js")).unwrap_or_default();
-        const SHARED: [&str; 5] =
-            ["memory", "__indirect_function_table", "__stack_pointer", "__memory_base", "__table_base"];
+        const SHARED: [&str; 5] = [
+            "memory",
+            "__indirect_function_table",
+            "__stack_pointer",
+            "__memory_base",
+            "__table_base",
+        ];
         for (m, n) in &imports {
             if m == "env" && SHARED.contains(&n.as_str()) {
                 continue;
             }
             // what wasm-bindgen reads the types of the app with; nothing calls it at run time
             if m == "__wbindgen_placeholder__"
-                && (matches!(n.as_str(), "__wbindgen_describe" | "__wbindgen_describe_generic_import")
-                    || glue.contains(&format!("{n}: function")))
+                && (matches!(
+                    n.as_str(),
+                    "__wbindgen_describe" | "__wbindgen_describe_generic_import"
+                ) || glue.contains(&format!("{n}: function")))
             {
                 continue;
             }
@@ -499,7 +514,10 @@ impl Dynamic {
                 v.get("modules")?.as_array().map(|a| {
                     a.iter()
                         .filter_map(|m| {
-                            Some((m.get("route")?.as_str()?.to_string(), m.get("url")?.as_str()?.to_string()))
+                            Some((
+                                m.get("route")?.as_str()?.to_string(),
+                                m.get("url")?.as_str()?.to_string(),
+                            ))
                         })
                         .collect()
                 })
@@ -647,7 +665,12 @@ impl Dynamic {
     /// The symbols the objects of a crate's newest library take from the rest of the app: what it
     /// refers to and doesn't define, and the mutable statics it defines (a side module refers to
     /// the app's copy of those)
-    fn imports_of(&mut self, dir: &Path, krate: &str, elf: Option<&str>) -> std::io::Result<BTreeSet<String>> {
+    fn imports_of(
+        &mut self,
+        dir: &Path,
+        krate: &str,
+        elf: Option<&str>,
+    ) -> std::io::Result<BTreeSet<String>> {
         let prefix = format!("lib{krate}-");
         let newest = std::fs::read_dir(dir)?
             .flatten()
@@ -667,7 +690,8 @@ impl Dynamic {
             return Ok(set.clone());
         }
         let data = std::fs::read(&rlib)?;
-        let (mut defined, mut undefined, mut writable) = (BTreeSet::new(), BTreeSet::new(), BTreeSet::new());
+        let (mut defined, mut undefined, mut writable) =
+            (BTreeSet::new(), BTreeSet::new(), BTreeSet::new());
         for (_, obj) in ar_objects(&data) {
             let scan = if elf.is_some() { elf_scan(obj) } else { wasm_scan(obj) };
             if let Some(scan) = scan {
@@ -704,18 +728,21 @@ fn ar_objects(data: &[u8]) -> Vec<(String, &[u8])> {
     while i + 60 <= data.len() {
         let header = &data[i..i + 60];
         let name = String::from_utf8_lossy(&header[..16]).trim_end().to_string();
-        let size: usize =
-            String::from_utf8_lossy(&header[48..58]).trim().parse().unwrap_or(0);
+        let size: usize = String::from_utf8_lossy(&header[48..58]).trim().parse().unwrap_or(0);
         let start = i + 60;
         let Some(body) = data.get(start..start + size) else { break };
         if name == "//" {
             names = body;
         } else if name != "/" && !name.starts_with("/SYM64/") {
-            let real = match name.strip_prefix('/').filter(|r| !r.is_empty() && r.bytes().all(|b| b.is_ascii_digit())) {
+            let real = match name
+                .strip_prefix('/')
+                .filter(|r| !r.is_empty() && r.bytes().all(|b| b.is_ascii_digit()))
+            {
                 Some(offset) => {
                     let at: usize = offset.parse().unwrap_or(0);
                     let rest = names.get(at..).unwrap_or_default();
-                    let end = rest.iter().position(|&b| b == b'/' || b == b'\n').unwrap_or(rest.len());
+                    let end =
+                        rest.iter().position(|&b| b == b'/' || b == b'\n').unwrap_or(rest.len());
                     String::from_utf8_lossy(&rest[..end]).into_owned()
                 }
                 None => name.trim_end_matches('/').to_string(),
@@ -950,21 +977,30 @@ fn wasm_symbols(d: &[u8], rewrite: bool) -> Option<(Scan, Option<Vec<u8>>)> {
                                 }
                                 _ => {
                                     let index = s.u32()? as usize;
-                                    let written = if !is_undefined || explicit { Some(s.name()?) } else { None };
+                                    let written = if !is_undefined || explicit {
+                                        Some(s.name()?)
+                                    } else {
+                                        None
+                                    };
                                     let import = match kind {
                                         0 => func_imports.get(index),
                                         2 => global_imports.get(index),
                                         _ => None,
                                     };
                                     if !(is_undefined && import.is_some_and(|i| i.0 != "env"))
-                                        && let Some(n) = written.or_else(|| import.map(|i| i.1.clone()))
+                                        && let Some(n) =
+                                            written.or_else(|| import.map(|i| i.1.clone()))
                                     {
                                         name = Some((n, is_undefined));
                                     }
                                 }
                             }
                             if let Some((n, undef)) = name {
-                                if undef { scan.undefined.insert(n.clone()) } else { scan.defined.insert(n.clone()) };
+                                if undef {
+                                    scan.undefined.insert(n.clone())
+                                } else {
+                                    scan.defined.insert(n.clone())
+                                };
                                 if unshare && rewrite {
                                     table.push(1);
                                     put_u32(&mut table, flags | 0x10);
@@ -1080,7 +1116,11 @@ fn elf_symbols(d: &mut [u8], rewrite: bool) -> Option<Scan> {
             }
             let n = e.cstr(strtab + name);
             if bind == 0 {
-                if shndx != 0 && shndx < 0xff00 && sections.get(shndx).is_some_and(|s| writable_segment(&s.0)) && kind == 1 {
+                if shndx != 0
+                    && shndx < 0xff00
+                    && sections.get(shndx).is_some_and(|s| writable_segment(&s.0))
+                    && kind == 1
+                {
                     scan.unshareable = true;
                 }
                 continue;
@@ -1090,7 +1130,10 @@ fn elf_symbols(d: &mut [u8], rewrite: bool) -> Option<Scan> {
             } else {
                 scan.defined.insert(n.clone());
                 if shndx < 0xff00 && sections.get(shndx).is_some_and(|s| writable_segment(&s.0)) {
-                    if kind == 6 || sections[shndx].0.starts_with(".tbss") || sections[shndx].0.starts_with(".tdata") {
+                    if kind == 6
+                        || sections[shndx].0.starts_with(".tbss")
+                        || sections[shndx].0.starts_with(".tdata")
+                    {
                         scan.unshareable = true;
                     } else if kind == 1 && !n.starts_with("DW.ref.") {
                         scan.writable.insert(n);

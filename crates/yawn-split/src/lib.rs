@@ -33,9 +33,16 @@ pub fn split(original: &[u8], bindgened: &[u8]) -> Result<Split, String> {
         .iter()
         .enumerate()
         .map(|(i, r)| {
-            let chunks = plan.chunks.iter().filter(|c| c.routes.contains(&i)).map(|c| c.id).collect();
+            let chunks =
+                plan.chunks.iter().filter(|c| c.routes.contains(&i)).map(|c| c.id).collect();
             (r.key.clone(), chunks)
         })
         .collect();
-    Ok(Split { main: out.main, chunks: out.chunks, routes, unmatched: out.unmatched, seconds: [graphed, planned - graphed, done - planned] })
+    Ok(Split {
+        main: out.main,
+        chunks: out.chunks,
+        routes,
+        unmatched: out.unmatched,
+        seconds: [graphed, planned - graphed, done - planned],
+    })
 }

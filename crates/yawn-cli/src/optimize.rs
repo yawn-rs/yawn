@@ -39,15 +39,19 @@ fn download(log: &dyn Fn(&str)) -> Result<PathBuf, String> {
     let dir = fetch::cache_dir("binaryen", BINARYEN)
         .ok_or("cannot find a cache directory (set HOME or XDG_CACHE_HOME)")?;
     let name = format!("binaryen-{BINARYEN}");
-    let exe = dir.join(&name).join("bin").join(if cfg!(windows) { "wasm-opt.exe" } else { "wasm-opt" });
+    let exe =
+        dir.join(&name).join("bin").join(if cfg!(windows) { "wasm-opt.exe" } else { "wasm-opt" });
     if exe.is_file() {
         return Ok(exe);
     }
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
     let archive = format!("{name}-{target}.tar.gz");
-    let url = format!("https://github.com/WebAssembly/binaryen/releases/download/{BINARYEN}/{archive}");
+    let url =
+        format!("https://github.com/WebAssembly/binaryen/releases/download/{BINARYEN}/{archive}");
     let instead = "install binaryen and put wasm-opt on PATH";
-    log(&format!("downloading wasm-opt ({BINARYEN}, {target}) from github.com/WebAssembly/binaryen, once"));
+    log(&format!(
+        "downloading wasm-opt ({BINARYEN}, {target}) from github.com/WebAssembly/binaryen, once"
+    ));
     let sums = fetch::curl(&format!("{url}.sha256"), None, instead)?;
     let want = sums
         .split_whitespace()
@@ -59,7 +63,9 @@ fn download(log: &dyn Fn(&str)) -> Result<PathBuf, String> {
     let got = fetch::sha256(&part)?;
     if got != want {
         let _ = std::fs::remove_file(&part);
-        return Err(format!("checksum mismatch for {archive}: expected {want}, got {got}; the download was discarded"));
+        return Err(format!(
+            "checksum mismatch for {archive}: expected {want}, got {got}; the download was discarded"
+        ));
     }
     let unpacked = fetch::run_ok(Command::new("tar").arg("-xzf").arg(&part).arg("-C").arg(&dir));
     let _ = std::fs::remove_file(&part);
@@ -220,7 +226,8 @@ const GENERATIONS: usize = 3;
 pub fn dictionary_chunks(pkg: &Path, store: &Path) -> std::io::Result<(usize, usize)> {
     use sha2::{Digest, Sha256};
     let main = std::fs::read(pkg.join("app_bg.wasm"))?;
-    let hashed = |n: &str| n.split('.').nth(1).is_some_and(|h| h.len() == 12 && n.ends_with(".wasm"));
+    let hashed =
+        |n: &str| n.split('.').nth(1).is_some_and(|h| h.len() == 12 && n.ends_with(".wasm"));
     let (mut whole, mut deltas) = (0, 0);
     let mut files: Vec<(String, PathBuf)> = Vec::new();
     for entry in std::fs::read_dir(pkg)? {
@@ -257,7 +264,11 @@ pub fn dictionary_chunks(pkg: &Path, store: &Path) -> std::io::Result<(usize, us
                 counts.0 += 1;
             }
         }
-        let logical = if is_chunk { name.split('.').next().unwrap_or("").to_string() } else { "main".to_string() };
+        let logical = if is_chunk {
+            name.split('.').next().unwrap_or("").to_string()
+        } else {
+            "main".to_string()
+        };
         let dir = store.join(&logical);
         std::fs::create_dir_all(&dir)?;
         let own = hex(&Sha256::digest(&data));
@@ -266,7 +277,7 @@ pub fn dictionary_chunks(pkg: &Path, store: &Path) -> std::io::Result<(usize, us
             .filter(|e| e.file_name().to_string_lossy() != format!("{own}.wasm"))
             .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
             .collect();
-        old.sort_by(|a, b| b.0.cmp(&a.0));
+        old.sort_by_key(|a| std::cmp::Reverse(a.0));
         for (_, previous) in old.iter().take(GENERATIONS) {
             let Ok(prior) = std::fs::read(previous) else { continue };
             let out = dcz(&prior, &data)?;

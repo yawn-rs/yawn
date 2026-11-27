@@ -129,13 +129,11 @@ pub fn apply(pkg: &Path, linked: &Path, log: &dyn Fn(&str), dev: bool) -> bool {
         let js_path = pkg.join("app.js");
         let js = std::fs::read_to_string(&js_path).map_err(|e| e.to_string())?;
         let split = yawn_split::split(&original, &bindgened)?;
-        if dev {
-            if let Ok(rd) = std::fs::read_dir(pkg) {
-                for e in rd.flatten() {
-                    let n = e.file_name().to_string_lossy().into_owned();
-                    if n.starts_with("chunk_") && n.ends_with(".wasm") {
-                        let _ = std::fs::remove_file(e.path());
-                    }
+        if dev && let Ok(rd) = std::fs::read_dir(pkg) {
+            for e in rd.flatten() {
+                let n = e.file_name().to_string_lossy().into_owned();
+                if n.starts_with("chunk_") && n.ends_with(".wasm") {
+                    let _ = std::fs::remove_file(e.path());
                 }
             }
         }
@@ -145,7 +143,9 @@ pub fn apply(pkg: &Path, linked: &Path, log: &dyn Fn(&str), dev: bool) -> bool {
             .enumerate()
             .map(|(i, bytes)| {
                 if dev {
-                    let hash = bytes.iter().fold(0xcbf29ce484222325u64, |h, b| (h ^ *b as u64).wrapping_mul(0x100000001b3));
+                    let hash = bytes.iter().fold(0xcbf29ce484222325u64, |h, b| {
+                        (h ^ *b as u64).wrapping_mul(0x100000001b3)
+                    });
                     format!("chunk_{i}_{hash:016x}.wasm")
                 } else {
                     format!("chunk_{i}.wasm")

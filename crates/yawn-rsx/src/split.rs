@@ -49,7 +49,8 @@ impl Unit {
             if !seen.insert(file.to_path_buf()) {
                 return;
             }
-            let text = pending_text(file).or_else(|| fs::read_to_string(file).ok()).unwrap_or_default();
+            let text =
+                pending_text(file).or_else(|| fs::read_to_string(file).ok()).unwrap_or_default();
             // files named by `#[path = "..."]`
             let mut rest = text.as_str();
             while let Some(at) = rest.find("#[path = \"") {
@@ -522,7 +523,9 @@ fn find_leaves(
                 None => {
                     for r in crate_refs(&source) {
                         let unit = index.get(r.as_str()).or_else(|| macro_owner.get(r.as_str()));
-                        match unit.and_then(|&u| (r != "routes").then(|| plan.group_of(u)).flatten()) {
+                        match unit
+                            .and_then(|&u| (r != "routes").then(|| plan.group_of(u)).flatten())
+                        {
                             Some(g) => {
                                 deps.insert(g.dir.clone());
                             }
@@ -535,10 +538,8 @@ fn find_leaves(
                 continue;
             }
             let rel = file.strip_prefix(&routes_dir).unwrap_or(&file).with_extension("");
-            let dir = format!(
-                "routes_{}",
-                rel.to_string_lossy().replace(['/', '-', '[', ']', '.'], "_")
-            );
+            let dir =
+                format!("routes_{}", rel.to_string_lossy().replace(['/', '-', '[', ']', '.'], "_"));
             out.push((path.clone(), at, Leaf { dir, name, file, deps, facade }));
         }
     }
@@ -707,7 +708,8 @@ pub fn apply(
                 leaf.name
             ));
             files.push((root.join(CRATES_DIR).join(&leaf.dir).join("lib.rs"), text));
-            members.push(Member { dir: leaf.dir.clone(), deps: leaf.deps.iter().cloned().collect() });
+            members
+                .push(Member { dir: leaf.dir.clone(), deps: leaf.deps.iter().cloned().collect() });
         }
         if let Some(m) = members.iter_mut().find(|m| m.dir == routes_dir) {
             m.deps.extend(leaves.iter().map(|(.., l)| l.dir.clone()));

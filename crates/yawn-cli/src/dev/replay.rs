@@ -280,15 +280,16 @@ pub struct Lane {
 impl Lane {
     /// `None` when replay is switched off or something else already wraps rustc
     pub fn new(root: &Path, log: PathBuf) -> Option<Lane> {
-        if std::env::var_os("YAWN_NO_REPLAY").is_some() || std::env::var_os(WRAPPER_ENV).is_some()
-        {
+        if std::env::var_os("YAWN_NO_REPLAY").is_some() || std::env::var_os(WRAPPER_ENV).is_some() {
             return None;
         }
         // the commands of an earlier session stay valid while the manifests are the same
         let kept = std::fs::read_to_string(log.with_extension("stamp"))
             .ok()
             .and_then(|t| t.trim().parse::<u64>().ok())
-            .filter(|stamp| *stamp == manifest_stamp(root) && std::fs::metadata(&log).is_ok_and(|m| m.len() > 0));
+            .filter(|stamp| {
+                *stamp == manifest_stamp(root) && std::fs::metadata(&log).is_ok_and(|m| m.len() > 0)
+            });
         if kept.is_none() {
             let _ = std::fs::write(&log, b"");
         }
@@ -362,7 +363,8 @@ impl Lane {
         if let Some(stem) = a.files.first().and_then(|f| f.file_stem()).and_then(|s| s.to_str()) {
             self.current.insert(stem.strip_prefix("lib").unwrap_or(stem).to_string());
         }
-        if a.executable.is_some() || a.files.iter().any(|f| f.extension().is_some_and(|e| e == "wasm"))
+        if a.executable.is_some()
+            || a.files.iter().any(|f| f.extension().is_some_and(|e| e == "wasm"))
         {
             self.finals.retain(|f| f.name != a.name);
             self.finals.push(a.clone());
@@ -442,8 +444,7 @@ impl Lane {
                 }
                 let out = info.targets.iter().filter_map(|t| mtime(t)).min();
                 let missing = info.targets.iter().any(|t| !t.exists());
-                let src: Option<Vec<SystemTime>> =
-                    info.sources.iter().map(|s| mtime(s)).collect();
+                let src: Option<Vec<SystemTime>> = info.sources.iter().map(|s| mtime(s)).collect();
                 let is_stale = match (out, src) {
                     (Some(out), Some(src)) if !missing => src.iter().any(|s| *s > out),
                     _ => true,
@@ -459,7 +460,6 @@ impl Lane {
 
     /// Rebuilds what an edit touched by running rustc directly. `None` sends the build to cargo
     pub fn try_run(&mut self, kill: &KillGroup, on: &mut dyn FnMut(&Parsed)) -> Option<CargoRun> {
-
         let start = Instant::now();
         let stamp = manifest_stamp(&self.root);
         if stamp != self.stamp {
@@ -519,7 +519,10 @@ impl Lane {
                                         c.env
                                             .iter()
                                             .filter(|(k, _)| {
-                                                !matches!(k.as_str(), "CARGO_MAKEFLAGS" | "MAKEFLAGS" | "MFLAGS")
+                                                !matches!(
+                                                    k.as_str(),
+                                                    "CARGO_MAKEFLAGS" | "MAKEFLAGS" | "MFLAGS"
+                                                )
                                             })
                                             .map(|(k, v)| (k, v)),
                                     )
@@ -539,7 +542,11 @@ impl Lane {
                     jobs.into_iter().map(|j| j.join().ok().flatten()).collect()
                 });
                 if kill.cut() {
-                    return Some(CargoRun { ok: false, duration: start.elapsed(), ..Default::default() });
+                    return Some(CargoRun {
+                        ok: false,
+                        duration: start.elapsed(),
+                        ..Default::default()
+                    });
                 }
                 for out in outs {
                     let out = out?;
@@ -564,16 +571,17 @@ impl Lane {
                 continue;
             }
             let hit = self.finals.iter().find_map(|a| {
-                let dst = a
-                    .executable
-                    .clone()
-                    .or_else(|| a.files.iter().find(|f| f.extension().is_some_and(|e| e == "wasm")).cloned())?;
+                let dst = a.executable.clone().or_else(|| {
+                    a.files.iter().find(|f| f.extension().is_some_and(|e| e == "wasm")).cloned()
+                })?;
                 let src = c.out_dir.join(dst.file_name()?);
                 src.is_file().then_some((src, dst))
             });
             let (src, dst) = hit?;
             let _ = std::fs::remove_file(&dst);
-            std::fs::hard_link(&src, &dst).or_else(|_| std::fs::copy(&src, &dst).map(|_| ())).ok()?;
+            std::fs::hard_link(&src, &dst)
+                .or_else(|_| std::fs::copy(&src, &dst).map(|_| ()))
+                .ok()?;
         }
         let mut run = CargoRun { ok: true, duration: start.elapsed(), ..Default::default() };
         for a in &self.finals {

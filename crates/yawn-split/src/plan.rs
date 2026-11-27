@@ -124,7 +124,8 @@ pub fn make(g: &Graph, opts: &Options) -> Plan {
     }
     // the linker merges identical constants, so several symbols can name the same bytes: those bytes
     // may only leave main when every symbol on them belongs to the same chunk
-    let owner_of: std::collections::HashMap<u32, usize> = chunk_syms.iter().map(|(c, i)| (*i, *c)).collect();
+    let owner_of: std::collections::HashMap<u32, usize> =
+        chunk_syms.iter().map(|(c, i)| (*i, *c)).collect();
     let mut ranges: Vec<(u32, u32, Option<usize>)> = Vec::new();
     for (i, a) in &g.data_addr {
         let size = g.data_size.get(i).copied().unwrap_or(0);
@@ -139,7 +140,10 @@ pub fn make(g: &Graph, opts: &Options) -> Plan {
         let id = chunk.id;
         chunk.data.retain(|(a, sz)| {
             let (lo, hi) = (*a, *a + *sz);
-            ranges.iter().take_while(|r| r.0 < hi).all(|(rl, rh, owner)| *rh <= lo || *rl >= hi || *owner == Some(id))
+            ranges
+                .iter()
+                .take_while(|r| r.0 < hi)
+                .all(|(rl, rh, owner)| *rh <= lo || *rl >= hi || *owner == Some(id))
         });
     }
     Plan { routes, chunks, main_bytes }

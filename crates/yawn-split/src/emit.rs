@@ -162,10 +162,10 @@ pub fn split(bindgened: &[u8], g: &Graph, plan: &Plan) -> Result<Output, String>
     // a route's entry must stay addressable from the router, so it is always a stub in main
     let mut entry_ords: BTreeSet<u32> = BTreeSet::new();
     for r in &plan.routes {
-        if let Some(v) = g.func_name.get(&r.entry).and_then(|n| by_name.get(n.as_str())) {
-            if v.len() == 1 {
-                entry_ords.insert(v[0]);
-            }
+        if let Some(v) = g.func_name.get(&r.entry).and_then(|n| by_name.get(n.as_str()))
+            && v.len() == 1
+        {
+            entry_ords.insert(v[0]);
         }
     }
 
@@ -176,14 +176,15 @@ pub fn split(bindgened: &[u8], g: &Graph, plan: &Plan) -> Result<Output, String>
     }
 
     // functions that something outside their own chunk calls or takes the address of
-    let mut stubbed: BTreeSet<u32> = entry_ords.iter().copied().filter(|o| owner.contains_key(o)).collect();
+    let mut stubbed: BTreeSet<u32> =
+        entry_ords.iter().copied().filter(|o| owner.contains_key(o)).collect();
     for (caller, set) in &callee_sets {
         let cc = owner.get(caller).copied();
         for callee in set {
-            if let Some(oc) = owner.get(callee) {
-                if Some(*oc) != cc {
-                    stubbed.insert(*callee);
-                }
+            if let Some(oc) = owner.get(callee)
+                && Some(*oc) != cc
+            {
+                stubbed.insert(*callee);
             }
         }
     }
@@ -211,7 +212,9 @@ pub fn split(bindgened: &[u8], g: &Graph, plan: &Plan) -> Result<Output, String>
     // the slots the module's own element segments give to moved functions
     let mut elem_slots: Vec<(u32, u32)> = Vec::new();
     for e in base.elements.iter() {
-        if let ElementKind::Active { table, offset: ConstExpr::Value(ir::Value::I32(off)) } = &e.kind {
+        if let ElementKind::Active { table, offset: ConstExpr::Value(ir::Value::I32(off)) } =
+            &e.kind
+        {
             if *table != table_id {
                 continue;
             }
@@ -249,7 +252,8 @@ pub fn split(bindgened: &[u8], g: &Graph, plan: &Plan) -> Result<Output, String>
             let jobs: Vec<_> = batch
                 .iter()
                 .map(|c| {
-                    let (funcs, needs, data) = (&chunk_funcs[c.id], &imports_of[c.id], &plan.chunks[c.id].data);
+                    let (funcs, needs, data) =
+                        (&chunk_funcs[c.id], &imports_of[c.id], &plan.chunks[c.id].data);
                     let (elem_slots, slot_of, owner) = (&elem_slots, &slot_of, &owner);
                     scope.spawn(move || {
                         emit_chunk(bindgened, c.id, funcs, needs, data, elem_slots, slot_of, owner)
@@ -361,7 +365,8 @@ fn emit_chunk(
     for (addr, size) in data {
         let mut bytes = vec![0u8; *size as usize];
         for d in m.data.iter() {
-            if let DataKind::Active { offset: ConstExpr::Value(ir::Value::I32(off)), .. } = &d.kind {
+            if let DataKind::Active { offset: ConstExpr::Value(ir::Value::I32(off)), .. } = &d.kind
+            {
                 let (s, e) = (*off as u32, *off as u32 + d.value.len() as u32);
                 let (a, b) = ((*addr).max(s), (addr + size).min(e));
                 if a < b {
@@ -482,7 +487,8 @@ fn emit_chunk(
             ir::dfs_in_order(&mut types, l, l.entry_block());
         }
     }
-    let unused: Vec<walrus::TypeId> = m.types.iter().map(|t| t.id()).filter(|t| !types.0.contains(t)).collect();
+    let unused: Vec<walrus::TypeId> =
+        m.types.iter().map(|t| t.id()).filter(|t| !types.0.contains(t)).collect();
     for t in unused {
         m.types.delete(t);
     }

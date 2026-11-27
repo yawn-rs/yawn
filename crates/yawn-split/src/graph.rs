@@ -129,22 +129,19 @@ pub fn build(bytes: &[u8]) -> Result<Graph, String> {
     for (i, s) in symbols.iter().enumerate() {
         let i = i as u32;
         match s {
-            SymbolInfo::Func { index, name, .. } => {
-                if let Some(n) = name {
-                    func_name.insert(*index, n.to_string());
-                }
+            SymbolInfo::Func { index, name: Some(n), .. } => {
+                func_name.insert(*index, n.to_string());
             }
-            SymbolInfo::Data { name, symbol, .. } => {
-                if let Some(d) = symbol {
-                    data_name.insert(i, name.to_string());
-                    data_size.insert(i, d.size);
-                    data_addr.insert(i, segment_addr.get(d.index as usize).copied().unwrap_or(0) + d.offset);
-                    data_syms.entry(d.index).or_default().push(DataSym {
-                        symbol: i,
-                        offset: d.offset,
-                        size: d.size,
-                    });
-                }
+            SymbolInfo::Data { name, symbol: Some(d), .. } => {
+                data_name.insert(i, name.to_string());
+                data_size.insert(i, d.size);
+                data_addr
+                    .insert(i, segment_addr.get(d.index as usize).copied().unwrap_or(0) + d.offset);
+                data_syms.entry(d.index).or_default().push(DataSym {
+                    symbol: i,
+                    offset: d.offset,
+                    size: d.size,
+                });
             }
             _ => {}
         }
@@ -163,14 +160,12 @@ pub fn build(bytes: &[u8]) -> Result<Graph, String> {
                     _ => None,
                 }
             }
-            MemoryAddrLeb | MemoryAddrLeb64 | MemoryAddrSleb | MemoryAddrSleb64
-            | MemoryAddrI32 | MemoryAddrI64 | MemoryAddrRelSleb | MemoryAddrRelSleb64
-            | MemoryAddrTlsSleb | MemoryAddrTlsSleb64 | MemoryAddrLocrelI32 => {
-                match symbols.get(index as usize)? {
-                    SymbolInfo::Data { symbol: Some(_), .. } => Some(Node::Data(index)),
-                    _ => None,
-                }
-            }
+            MemoryAddrLeb | MemoryAddrLeb64 | MemoryAddrSleb | MemoryAddrSleb64 | MemoryAddrI32
+            | MemoryAddrI64 | MemoryAddrRelSleb | MemoryAddrRelSleb64 | MemoryAddrTlsSleb
+            | MemoryAddrTlsSleb64 | MemoryAddrLocrelI32 => match symbols.get(index as usize)? {
+                SymbolInfo::Data { symbol: Some(_), .. } => Some(Node::Data(index)),
+                _ => None,
+            },
             _ => None,
         }
     };
@@ -193,20 +188,15 @@ pub fn build(bytes: &[u8]) -> Result<Graph, String> {
     for r in &data_relocs {
         let abs = data_start + r.offset as usize;
         let at = segments.partition_point(|(s, len)| s + len <= abs);
-        let src = segments
-            .get(at)
-            .filter(|(s, _)| abs >= *s)
-            .and_then(|(s, _)| {
-                let within = (abs - s) as u32;
-                let list = data_syms.get(&(at as u32))?;
-                let k = list.partition_point(|d| d.offset + d.size.max(1) <= within);
-                list.get(k).filter(|d| within >= d.offset).map(|d| Node::Data(d.symbol))
-            });
+        let src = segments.get(at).filter(|(s, _)| abs >= *s).and_then(|(s, _)| {
+            let within = (abs - s) as u32;
+            let list = data_syms.get(&(at as u32))?;
+            let k = list.partition_point(|d| d.offset + d.size.max(1) <= within);
+            list.get(k).filter(|d| within >= d.offset).map(|d| Node::Data(d.symbol))
+        });
         let src = match src {
             Some(s) => s,
-            None => {
-                Node::Root
-            }
+            None => Node::Root,
         };
         if let Some(t) = target(r.ty, r.index) {
             edges.entry(src).or_default().push(t);
@@ -218,10 +208,24 @@ pub fn build(bytes: &[u8]) -> Result<Graph, String> {
         roots.push(Node::Func(s));
     }
     roots.push(Node::Root);
-    Ok(Graph { data_addr, edges, func_size, data_size, func_name, data_name, roots, imported_funcs })
+    Ok(Graph {
+        data_addr,
+        edges,
+        func_size,
+        data_size,
+        func_name,
+        data_name,
+        roots,
+        imported_funcs,
+    })
 }
 
-pub fn reach(g: &Graph, from: &[Node], skip: &BTreeSet<Node>, blocked: &dyn Fn(Node) -> bool) -> BTreeSet<Node> {
+pub fn reach(
+    g: &Graph,
+    from: &[Node],
+    skip: &BTreeSet<Node>,
+    blocked: &dyn Fn(Node) -> bool,
+) -> BTreeSet<Node> {
     let mut seen: BTreeSet<Node> = BTreeSet::new();
     let mut stack: Vec<Node> = from.to_vec();
     while let Some(n) = stack.pop() {

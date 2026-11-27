@@ -112,8 +112,19 @@ fn builder<C: Component + Default + 'static>() -> Build {
 }
 
 enum Entry {
-    Page { pattern: Pattern, build: Build, key: &'static str, preload: Option<PreloadFn> },
-    Layout { pattern: Pattern, build: Build, key: &'static str, children: Routes, preload: Option<PreloadFn> },
+    Page {
+        pattern: Pattern,
+        build: Build,
+        key: &'static str,
+        preload: Option<PreloadFn>,
+    },
+    Layout {
+        pattern: Pattern,
+        build: Build,
+        key: &'static str,
+        children: Routes,
+        preload: Option<PreloadFn>,
+    },
 }
 
 /// A table of routes. Pages show for their path; a layout wraps the routes inside it and places

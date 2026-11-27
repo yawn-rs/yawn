@@ -24,7 +24,13 @@ fn cargo_args(root: &Path, args: &[&str], target_dir: &str) -> Vec<String> {
     v
 }
 
-fn cargo(root: &Path, args: &[&str], target_dir: &str, what: &str, tail: &[&str]) -> Result<(), CliError> {
+fn cargo(
+    root: &Path,
+    args: &[&str],
+    target_dir: &str,
+    what: &str,
+    tail: &[&str],
+) -> Result<(), CliError> {
     let status = Command::new("cargo")
         .args(cargo_args(root, args, target_dir))
         .args(tail)
@@ -73,7 +79,11 @@ fn build_client(root: &Path, project: &Project, pkg: &Path) -> Result<(), CliErr
             .collect()
     };
     args.extend(profile.iter().map(String::as_str));
-    let tail: &[&str] = if std::env::var_os("YAWN_NO_SPLIT").is_some() { &[] } else { &["--", "-Clink-arg=--emit-relocs"] };
+    let tail: &[&str] = if std::env::var_os("YAWN_NO_SPLIT").is_some() {
+        &[]
+    } else {
+        &["--", "-Clink-arg=--emit-relocs"]
+    };
     cargo(root, &args, CLIENT_TARGET_DIR, "client build", tail)?;
     let lib = if root.join(yawn_rsx::manifest::MANIFEST).is_file() {
         yawn_rsx::manifest::LIB_NAME.to_string()
@@ -89,8 +99,12 @@ fn build_client(root: &Path, project: &Project, pkg: &Path) -> Result<(), CliErr
     let log = |m: &str| eprintln!("      {m}");
     let after = Instant::now();
     let tool = wasm_bindgen::tool(root, &log).map_err(CliError::new)?;
-    let options =
-        wasm_bindgen::Options { out_name: "app", demangle: false, remove_names: false, keep_linker_exports: false };
+    let options = wasm_bindgen::Options {
+        out_name: "app",
+        demangle: false,
+        remove_names: false,
+        keep_linker_exports: false,
+    };
     wasm_bindgen::run(&tool, &wasm, pkg, &options).map_err(CliError::new)?;
     log(&format!("wasm-bindgen {:.1}s", after.elapsed().as_secs_f32()));
     let split_at = Instant::now();

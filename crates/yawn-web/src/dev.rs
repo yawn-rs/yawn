@@ -84,9 +84,8 @@ pub(crate) fn refresh_native() {
         return;
     }
     state.0 = Some(stamp);
-    let Some(list) = std::fs::read(&path)
-        .ok()
-        .and_then(|b| serde_json::from_slice::<Vec<String>>(&b).ok())
+    let Some(list) =
+        std::fs::read(&path).ok().and_then(|b| serde_json::from_slice::<Vec<String>>(&b).ok())
     else {
         return;
     };

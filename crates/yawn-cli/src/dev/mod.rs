@@ -142,10 +142,7 @@ impl Dev {
         } else {
             None
         };
-        let lanes = [
-            lane("replay-client.log"),
-            lane("replay-server.log"),
-        ];
+        let lanes = [lane("replay-client.log"), lane("replay-server.log")];
         Dev {
             project: src.project,
             port: src.port,
@@ -602,8 +599,9 @@ impl Dev {
                 ok = false;
             }
         }
-        let snapshot =
-            (cs.client && rsx_ok).then(|| literals::Snapshot::read(&self.project.root, &mut self.snapshot_cache)).flatten();
+        let snapshot = (cs.client && rsx_ok)
+            .then(|| literals::Snapshot::read(&self.project.root, &mut self.snapshot_cache))
+            .flatten();
         let patch = if !cs.initial
             && !cs.server
             && !cs.restart
@@ -649,149 +647,165 @@ impl Dev {
         }
         let mut sided = false;
         let mut early: Option<CargoDone> = None;
-        if cs.client && rsx_ok && !patched && !cs.initial && !cs.server && !cs.restart {
-            if let Some(mut d) = self.dynamic.take() {
-                match d.plan() {
-                    dynamic::Plan::Nothing => {}
-                    dynamic::Plan::Full(why) => self.log(Level::Debug, "client", format!("full build: {why}")),
-                    dynamic::Plan::Leaves(leaves) => {
-                        let t = Instant::now();
-                        self.progress(0, 0, "side module", true);
-                        let kill = self.build_kill.clone();
-                        kill.clear();
-                        let recs: Vec<Option<replay::Recorded>> = leaves
-                            .iter()
-                            .map(|leaf| {
-                                let krate = leaf.package.replace('-', "_");
-                                self.lanes[0]
-                                    .as_ref()
-                                    .and_then(|l| l.lock().unwrap_or_else(|e| e.into_inner()).recorded(&krate))
+        if cs.client
+            && rsx_ok
+            && !patched
+            && !cs.initial
+            && !cs.server
+            && !cs.restart
+            && let Some(mut d) = self.dynamic.take()
+        {
+            match d.plan() {
+                dynamic::Plan::Nothing => {}
+                dynamic::Plan::Full(why) => {
+                    self.log(Level::Debug, "client", format!("full build: {why}"))
+                }
+                dynamic::Plan::Leaves(leaves) => {
+                    let t = Instant::now();
+                    self.progress(0, 0, "side module", true);
+                    let kill = self.build_kill.clone();
+                    kill.clear();
+                    let recs: Vec<Option<replay::Recorded>> = leaves
+                        .iter()
+                        .map(|leaf| {
+                            let krate = leaf.package.replace('-', "_");
+                            self.lanes[0].as_ref().and_then(|l| {
+                                l.lock().unwrap_or_else(|e| e.into_inner()).recorded(&krate)
                             })
-                            .collect();
-                        let dist = self.project.dist.clone();
-                        let blocked = leaves.iter().any(|l| d.native_blocked(&l.dir));
-                        let side = |d: &mut dynamic::Dynamic| {
-                            let mut out = Vec::new();
-                            for (leaf, rec) in leaves.iter().zip(&recs) {
-                                let mut seen = Vec::new();
-                                let r = match rec {
-                                    Some(rec) => d.build_side(leaf, rec, &dist, &kill, &mut |p| seen.push(p.clone())),
-                                    None => Err(dynamic::SideError::Fallback("no recorded rustc command".into())),
-                                };
-                                let stop = r.is_err();
-                                out.push((seen, r));
-                                if stop {
-                                    break;
-                                }
-                            }
-                            out
-                        };
-                        let results = if need_server && !cs.server && blocked {
-                            self.log(Level::Debug, "server", "full build: the crate has mutable statics");
-                            let (results, done) = std::thread::scope(|scope| {
-                                let job = scope.spawn(|| side(&mut d));
-                                let done = self.run_cargo(false, true, errors, &mut counts);
-                                (job.join().unwrap_or_default(), done)
-                            });
-                            early = Some(done);
-                            results
-                        } else {
-                            side(&mut d)
-                        };
-                        let mut all = true;
-                        for (seen, r) in results {
-                            for p in &seen {
-                                self.report(p, errors, &mut counts, "client");
-                            }
-                            match r {
-                                Ok(()) => {}
-                                Err(dynamic::SideError::Failed) => {
-                                    ok = false;
-                                    sided = true;
-                                    all = false;
-                                }
-                                Err(dynamic::SideError::Fallback(why)) => {
-                                    self.log(Level::Debug, "client", format!("full build: {why}"));
-                                    all = false;
-                                }
+                        })
+                        .collect();
+                    let dist = self.project.dist.clone();
+                    let blocked = leaves.iter().any(|l| d.native_blocked(&l.dir));
+                    let side = |d: &mut dynamic::Dynamic| {
+                        let mut out = Vec::new();
+                        for (leaf, rec) in leaves.iter().zip(&recs) {
+                            let mut seen = Vec::new();
+                            let r = match rec {
+                                Some(rec) => d.build_side(leaf, rec, &dist, &kill, &mut |p| {
+                                    seen.push(p.clone())
+                                }),
+                                None => Err(dynamic::SideError::Fallback(
+                                    "no recorded rustc command".into(),
+                                )),
+                            };
+                            let stop = r.is_err();
+                            out.push((seen, r));
+                            if stop {
+                                break;
                             }
                         }
-                        if all {
-                            sided = true;
-                            timings.push(format!("side module {}", fmt_duration(t.elapsed())));
-                            if need_server && !cs.server && !blocked {
-                                let t = Instant::now();
-                                let mut done = true;
-                                for leaf in &leaves {
-                                    let args = self.cargo_args(
-                                        &[
-                                            "build",
-                                            "-p",
-                                            leaf.package.as_str(),
-                                            "--lib",
-                                            "--config",
-                                            "profile.dev.opt-level=0",
-                                        ],
-                                        Some(SERVER_TARGET_DIR),
-                                    );
-                                    let args: Vec<&str> = args.iter().map(String::as_str).collect();
-                                    let env = self.lanes[1]
-                                        .as_ref()
-                                        .map(|l| l.lock().unwrap_or_else(|e| e.into_inner()).env())
-                                        .unwrap_or_default();
-                                    let mut seen = Vec::new();
-                                    let r = d.build_native(
-                                        leaf,
-                                        &args,
-                                        &env,
-                                        &self.project.dev_dir,
-                                        &kill,
-                                        &mut |p| seen.push(p.clone()),
-                                    );
-                                    for p in &seen {
-                                        self.report(p, errors, &mut counts, "server");
-                                    }
-                                    match r {
-                                        Ok(()) => {}
-                                        Err(dynamic::SideError::Failed) => {
-                                            ok = false;
-                                            done = false;
-                                            need_server = false;
-                                            break;
-                                        }
-                                        Err(dynamic::SideError::Fallback(why)) => {
-                                            self.log(
-                                                Level::Debug,
-                                                "server",
-                                                format!("full build: {why}"),
-                                            );
-                                            done = false;
-                                            break;
-                                        }
-                                    }
-                                }
-                                if done {
-                                    need_server = false;
-                                    self.server_rebuilt = false;
-                                    timings.push(format!("server module {}", fmt_duration(t.elapsed())));
-                                    if let Some(next) = snapshot.clone() {
-                                        let _ = literals::write_server(
-                                            &self.project.dev_dir,
-                                            &Default::default(),
-                                        );
-                                        self.server_baseline = Some(next);
-                                    }
-                                }
+                        out
+                    };
+                    let results = if need_server && !cs.server && blocked {
+                        self.log(
+                            Level::Debug,
+                            "server",
+                            "full build: the crate has mutable statics",
+                        );
+                        let (results, done) = std::thread::scope(|scope| {
+                            let job = scope.spawn(|| side(&mut d));
+                            let done = self.run_cargo(false, true, errors, &mut counts);
+                            (job.join().unwrap_or_default(), done)
+                        });
+                        early = Some(done);
+                        results
+                    } else {
+                        side(&mut d)
+                    };
+                    let mut all = true;
+                    for (seen, r) in results {
+                        for p in &seen {
+                            self.report(p, errors, &mut counts, "client");
+                        }
+                        match r {
+                            Ok(()) => {}
+                            Err(dynamic::SideError::Failed) => {
+                                ok = false;
+                                sided = true;
+                                all = false;
                             }
-                            if let Some(next) = snapshot.clone() {
-                                let _ = literals::write(&self.project.dev_dir, &Default::default());
-                                self.literal_baseline = Some(next);
+                            Err(dynamic::SideError::Fallback(why)) => {
+                                self.log(Level::Debug, "client", format!("full build: {why}"));
+                                all = false;
                             }
                         }
                     }
+                    if all {
+                        sided = true;
+                        timings.push(format!("side module {}", fmt_duration(t.elapsed())));
+                        if need_server && !cs.server && !blocked {
+                            let t = Instant::now();
+                            let mut done = true;
+                            for leaf in &leaves {
+                                let args = self.cargo_args(
+                                    &[
+                                        "build",
+                                        "-p",
+                                        leaf.package.as_str(),
+                                        "--lib",
+                                        "--config",
+                                        "profile.dev.opt-level=0",
+                                    ],
+                                    Some(SERVER_TARGET_DIR),
+                                );
+                                let args: Vec<&str> = args.iter().map(String::as_str).collect();
+                                let env = self.lanes[1]
+                                    .as_ref()
+                                    .map(|l| l.lock().unwrap_or_else(|e| e.into_inner()).env())
+                                    .unwrap_or_default();
+                                let mut seen = Vec::new();
+                                let r = d.build_native(
+                                    leaf,
+                                    &args,
+                                    &env,
+                                    &self.project.dev_dir,
+                                    &kill,
+                                    &mut |p| seen.push(p.clone()),
+                                );
+                                for p in &seen {
+                                    self.report(p, errors, &mut counts, "server");
+                                }
+                                match r {
+                                    Ok(()) => {}
+                                    Err(dynamic::SideError::Failed) => {
+                                        ok = false;
+                                        done = false;
+                                        need_server = false;
+                                        break;
+                                    }
+                                    Err(dynamic::SideError::Fallback(why)) => {
+                                        self.log(
+                                            Level::Debug,
+                                            "server",
+                                            format!("full build: {why}"),
+                                        );
+                                        done = false;
+                                        break;
+                                    }
+                                }
+                            }
+                            if done {
+                                need_server = false;
+                                self.server_rebuilt = false;
+                                timings
+                                    .push(format!("server module {}", fmt_duration(t.elapsed())));
+                                if let Some(next) = snapshot.clone() {
+                                    let _ = literals::write_server(
+                                        &self.project.dev_dir,
+                                        &Default::default(),
+                                    );
+                                    self.server_baseline = Some(next);
+                                }
+                            }
+                        }
+                        if let Some(next) = snapshot.clone() {
+                            let _ = literals::write(&self.project.dev_dir, &Default::default());
+                            self.literal_baseline = Some(next);
+                        }
+                    }
                 }
-                self.dynamic = Some(d);
             }
+            self.dynamic = Some(d);
         }
         let client = cs.client && rsx_ok && !patched && !sided;
         let server = need_server && !self.stopping();
@@ -1015,7 +1029,10 @@ impl Dev {
         let mut done = CargoDone { ok: true, client: None, server: None };
         let mut progress: HashMap<&'static str, (u32, u32)> = HashMap::new();
         std::thread::scope(|scope| {
-            let spawn = |label: &'static str, args: Vec<String>, lane: Option<Arc<Mutex<replay::Lane>>>, extra: Vec<(String, String)>| {
+            let spawn = |label: &'static str,
+                         args: Vec<String>,
+                         lane: Option<Arc<Mutex<replay::Lane>>>,
+                         extra: Vec<(String, String)>| {
                 let (tx, root, kill, package) =
                     (tx.clone(), root.clone(), kill.clone(), package.clone());
                 scope.spawn(move || {
@@ -1215,7 +1232,8 @@ impl Dev {
             self.dynamic = Some(d);
         }
         // `fresh` isn't enough: another cargo may have built the wasm just before this run
-        if !relinked && bundle_is_current(&wasm_path, &out.join(format!("{CLIENT_BUNDLE}_bg.wasm"))) {
+        if !relinked && bundle_is_current(&wasm_path, &out.join(format!("{CLIENT_BUNDLE}_bg.wasm")))
+        {
             self.log(Level::Debug, "client", "wasm unchanged, skipping wasm-bindgen");
             if let Some(mut d) = self.dynamic.take() {
                 if !out.join("dyn").join("manifest.json").is_file() {

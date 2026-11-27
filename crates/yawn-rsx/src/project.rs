@@ -221,10 +221,10 @@ fn compiled_files() -> &'static std::sync::Mutex<BTreeMap<PathBuf, CachedFile>> 
     FILES.get_or_init(Default::default)
 }
 
+type Headers = std::sync::Mutex<BTreeMap<PathBuf, (u64, Vec<(String, Vec<String>)>)>>;
+
 /// The component headers of the files read earlier, by file and text
-fn header_cache() -> &'static std::sync::Mutex<BTreeMap<PathBuf, (u64, Vec<(String, Vec<String>)>)>>
-{
-    type Headers = std::sync::Mutex<BTreeMap<PathBuf, (u64, Vec<(String, Vec<String>)>)>>;
+fn header_cache() -> &'static Headers {
     static HEADERS: std::sync::OnceLock<Headers> = std::sync::OnceLock::new();
     HEADERS.get_or_init(Default::default)
 }
@@ -575,10 +575,9 @@ fn compile_own(root: &Path, split: bool) -> Result<Report, Vec<FileDiagnostic>> 
         }
         let source_key = hash_of(&source);
         let abs = root.join(&display);
-        let cached = compiled_files()
-            .lock()
-            .ok()
-            .and_then(|c| c.get(&abs).filter(|f| f.source == source_key && f.known == known_key).cloned());
+        let cached = compiled_files().lock().ok().and_then(|c| {
+            c.get(&abs).filter(|f| f.source == source_key && f.known == known_key).cloned()
+        });
         let compiled = match cached {
             Some(f) => Ok((f.rust, f.css, f.map)),
             None => crate::compile_with(&source, &display, &known).map(|c| {

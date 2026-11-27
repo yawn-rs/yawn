@@ -44,7 +44,9 @@ fn main() {
     println!("total code {} KB, data symbols {} KB", total_funcs / 1024, total_data / 1024);
     println!("main reaches {} KB (before routes)", main_bytes / 1024);
 
-    if std::env::var("DUMP").is_ok() { dump_main(&g, &main); }
+    if std::env::var("DUMP").is_ok() {
+        dump_main(&g, &main);
+    }
     let mut owners: BTreeMap<Node, BTreeSet<u32>> = BTreeMap::new();
     for (i, _) in &points {
         let r = graph::reach(&g, &[Node::Func(*i)], &point_set, &|n| main.contains(&n));
@@ -61,13 +63,18 @@ fn main() {
     }
     let exclusive: u64 = by_set.iter().filter(|(k, _)| k.len() == 1).map(|(_, v)| *v).sum();
     let shared: u64 = by_set.iter().filter(|(k, _)| k.len() > 1).map(|(_, v)| *v).sum();
-    println!("exclusive to one route: {} KB, shared by >=2 routes: {} KB, in main: {} KB", exclusive / 1024, shared / 1024, main_bytes / 1024);
+    println!(
+        "exclusive to one route: {} KB, shared by >=2 routes: {} KB, in main: {} KB",
+        exclusive / 1024,
+        shared / 1024,
+        main_bytes / 1024
+    );
     let mut per: Vec<(u64, String)> = by_set
         .iter()
         .filter(|(k, _)| k.len() == 1)
         .map(|(k, v)| (*v, points.iter().find(|(i, _)| *i == k[0]).unwrap().1.clone()))
         .collect();
-    per.sort_by(|a, b| b.0.cmp(&a.0));
+    per.sort_by_key(|a| std::cmp::Reverse(a.0));
     println!("largest exclusive routes:");
     for (s, n) in per.iter().take(12) {
         println!("  {:>6} KB  {}", s / 1024, n.chars().take(110).collect::<String>());
@@ -85,13 +92,21 @@ pub fn dump_main(g: &graph::Graph, main: &BTreeSet<Node>) {
     let mut v: Vec<(u32, String)> = main
         .iter()
         .filter_map(|n| match n {
-            Node::Func(i) => Some((*g.func_size.get(i).unwrap_or(&0), g.func_name.get(i).cloned().unwrap_or_else(|| format!("fn{i}")))),
+            Node::Func(i) => Some((
+                *g.func_size.get(i).unwrap_or(&0),
+                g.func_name.get(i).cloned().unwrap_or_else(|| format!("fn{i}")),
+            )),
             _ => None,
         })
         .collect();
-    v.sort_by(|a, b| b.0.cmp(&a.0));
-    let routes: u64 = v.iter().filter(|(_, n)| demangled(n).contains("::routes::")).map(|(s, _)| *s as u64).sum();
-    println!("main bytes in ::routes:: functions: {} KB ({} fns)", routes / 1024, v.iter().filter(|(_, n)| demangled(n).contains("::routes::")).count());
+    v.sort_by_key(|a| std::cmp::Reverse(a.0));
+    let routes: u64 =
+        v.iter().filter(|(_, n)| demangled(n).contains("::routes::")).map(|(s, _)| *s as u64).sum();
+    println!(
+        "main bytes in ::routes:: functions: {} KB ({} fns)",
+        routes / 1024,
+        v.iter().filter(|(_, n)| demangled(n).contains("::routes::")).count()
+    );
     for (s, n) in v.iter().take(25) {
         println!("  {:>6} B {}", s, demangled(n).chars().take(120).collect::<String>());
     }
@@ -100,10 +115,19 @@ pub fn dump_main(g: &graph::Graph, main: &BTreeSet<Node>) {
 fn split_cmd() {
     let a: Vec<String> = std::env::args().collect();
     let (orig, bind, out) = (&a[2], &a[3], std::path::Path::new(&a[4]));
-    let res = yawn_split::split(&std::fs::read(orig).expect("original"), &std::fs::read(bind).expect("bindgened")).expect("split");
+    let res = yawn_split::split(
+        &std::fs::read(orig).expect("original"),
+        &std::fs::read(bind).expect("bindgened"),
+    )
+    .expect("split");
     std::fs::create_dir_all(out).unwrap();
     std::fs::write(out.join("main.wasm"), &res.main).unwrap();
-    println!("main {} KB, {} chunks, {} routes", res.main.len() / 1024, res.chunks.len(), res.routes.len());
+    println!(
+        "main {} KB, {} chunks, {} routes",
+        res.main.len() / 1024,
+        res.chunks.len(),
+        res.routes.len()
+    );
     for (i, c) in res.chunks.iter().enumerate() {
         std::fs::write(out.join(format!("chunk_{i}.wasm")), c).unwrap();
     }
@@ -117,5 +141,9 @@ pub fn names_sample(orig: &graph::Graph, bind: &[u8]) {
     let mut o: Vec<_> = orig.func_name.iter().take(5).collect();
     o.sort();
     println!("orig sample: {:?}", o);
-    println!("funcs {} named {}", m.funcs.iter().count(), m.funcs.iter().filter(|f| f.name.is_some()).count());
+    println!(
+        "funcs {} named {}",
+        m.funcs.iter().count(),
+        m.funcs.iter().filter(|f| f.name.is_some()).count()
+    );
 }

@@ -206,7 +206,9 @@ fn stateful(text: &str) -> bool {
         let t = t.strip_prefix("pub ").or_else(|| t.strip_prefix("pub(crate) ")).unwrap_or(t);
         (t.starts_with("static ") && !t.starts_with("static ref") && {
             let ty = t.split_once(':').map_or("", |(_, r)| r.trim_start());
-            !(ty.starts_with('&') || ty.starts_with('[') && !ty.contains("Mutex") || ty.starts_with("fn"))
+            !(ty.starts_with('&')
+                || ty.starts_with('[') && !ty.contains("Mutex")
+                || ty.starts_with("fn"))
         }) || t.contains("thread_local!")
             || t.contains("lazy_static!")
             || t.contains("LazyLock<")
@@ -281,7 +283,8 @@ pub fn refine(root: &Path, plan: &Plan, macros: &[Vec<String>]) -> Option<Refine
     if !plan.groups.iter().any(|g| g.units.len() > 1) {
         return None;
     }
-    let movable: BTreeSet<usize> = plan.groups.iter().flat_map(|g| g.units.iter().copied()).collect();
+    let movable: BTreeSet<usize> =
+        plan.groups.iter().flat_map(|g| g.units.iter().copied()).collect();
     let mut nodes: Vec<Node> = Vec::new();
     let mut children: BTreeMap<usize, Vec<Child>> = BTreeMap::new();
     let mut unit_root = BTreeMap::new();
@@ -294,8 +297,10 @@ pub fn refine(root: &Path, plan: &Plan, macros: &[Vec<String>]) -> Option<Refine
             .flatten()
             .filter(|k| !k.is_empty());
         let kids = kids.filter(|k| {
-            let texts: Vec<String> =
-                k.iter().map(|c| Unit { file: c.file.clone(), ..unit.clone() }.source_text()).collect();
+            let texts: Vec<String> = k
+                .iter()
+                .map(|c| Unit { file: c.file.clone(), ..unit.clone() }.source_text())
+                .collect();
             !text.contains("include!")
                 && !text.contains("include_str!")
                 && !texts.iter().chain(std::iter::once(&text)).any(|t| {
@@ -310,7 +315,13 @@ pub fn refine(root: &Path, plan: &Plan, macros: &[Vec<String>]) -> Option<Refine
         match kids {
             Some(kids) => {
                 let r = nodes.len();
-                nodes.push(Node { unit: u, child: None, file: unit.file.clone(), text, root: true });
+                nodes.push(Node {
+                    unit: u,
+                    child: None,
+                    file: unit.file.clone(),
+                    text,
+                    root: true,
+                });
                 unit_root.insert(u, r);
                 let mut map = BTreeMap::new();
                 for c in &kids {
@@ -341,10 +352,8 @@ pub fn refine(root: &Path, plan: &Plan, macros: &[Vec<String>]) -> Option<Refine
     }
     let by_name: BTreeMap<&str, usize> =
         movable.iter().map(|&u| (plan.units[u].name.as_str(), u)).collect();
-    let macro_owner: BTreeMap<String, usize> = movable
-        .iter()
-        .flat_map(|&u| macros[u].iter().map(move |m| (m.clone(), u)))
-        .collect();
+    let macro_owner: BTreeMap<String, usize> =
+        movable.iter().flat_map(|&u| macros[u].iter().map(move |m| (m.clone(), u))).collect();
     let n = nodes.len();
     let mut deps: Vec<BTreeSet<usize>> = vec![BTreeSet::new(); n];
     let resolve = |path: &[String]| -> Option<usize> {
@@ -396,7 +405,8 @@ pub fn refine(root: &Path, plan: &Plan, macros: &[Vec<String>]) -> Option<Refine
     let mut glue: Vec<(usize, usize)> = Vec::new();
     for (i, node) in nodes.iter().enumerate() {
         for (idents, _) in impl_headers(&node.text) {
-            let known: Vec<&BTreeSet<usize>> = idents.iter().filter_map(|id| defs.get(id)).collect();
+            let known: Vec<&BTreeSet<usize>> =
+                idents.iter().filter_map(|id| defs.get(id)).collect();
             if known.is_empty() || known.iter().any(|set| set.contains(&i)) {
                 continue;
             }
@@ -423,7 +433,10 @@ pub fn refine(root: &Path, plan: &Plan, macros: &[Vec<String>]) -> Option<Refine
         .iter()
         .enumerate()
         .map(|(c, comp)| {
-            comp.iter().flat_map(|&v| deps[v].iter().map(|&d| comp_of[d])).filter(|&d| d != c).collect()
+            comp.iter()
+                .flat_map(|&v| deps[v].iter().map(|&d| comp_of[d]))
+                .filter(|&d| d != c)
+                .collect()
         })
         .collect();
     let mut level: Vec<Option<usize>> = vec![None; comps.len()];
@@ -441,13 +454,18 @@ pub fn refine(root: &Path, plan: &Plan, macros: &[Vec<String>]) -> Option<Refine
     let mut crates: Vec<RCrate> = Vec::new();
     let mut node_crate = vec![0usize; n];
     let mut order: Vec<usize> = (0..comps.len()).collect();
-    let levels: Vec<usize> = (0..comps.len()).map(|c| level_of(c, &comp_deps, &mut level)).collect();
+    let levels: Vec<usize> =
+        (0..comps.len()).map(|c| level_of(c, &comp_deps, &mut level)).collect();
     order.sort_by_key(|&c| (levels[c], comps[c][0]));
     for c in order {
         let key = (levels[c], comp_state[c]);
         let k = *crate_of.entry(key).or_insert_with(|| {
             crates.push(RCrate {
-                dir: if key.1 { format!("layer{}_state", key.0) } else { format!("layer{}", key.0) },
+                dir: if key.1 {
+                    format!("layer{}_state", key.0)
+                } else {
+                    format!("layer{}", key.0)
+                },
                 nodes: Vec::new(),
                 needs: BTreeSet::new(),
             });
@@ -522,7 +540,12 @@ impl Refined {
 
     /// The `pub mod` and `pub use` lines a crate that owns `own` and uses `needs` starts with, and
     /// the files of its own they refer to
-    fn facade(&self, k: usize, own: &[usize], needs: &BTreeSet<usize>) -> (String, Vec<(String, String)>) {
+    fn facade(
+        &self,
+        k: usize,
+        own: &[usize],
+        needs: &BTreeSet<usize>,
+    ) -> (String, Vec<(String, String)>) {
         let mut text = String::new();
         let mut shadows = Vec::new();
         let mut units: BTreeMap<usize, ()> = BTreeMap::new();
@@ -530,7 +553,7 @@ impl Refined {
             units.insert(self.nodes[v].unit, ());
         }
         let owned: BTreeSet<usize> = own.iter().copied().collect();
-        for (&u, _) in &units {
+        for &u in units.keys() {
             let unit = &self.units[u];
             let root = self.unit_root[&u];
             let kids = self.unit_children.get(&u);
@@ -546,9 +569,18 @@ impl Refined {
                             unit.name
                         ));
                     } else {
-                        text.push_str(&format!("{}pub use {}::{};\n", unit.attrs, ident(root), unit.name));
+                        text.push_str(&format!(
+                            "{}pub use {}::{};\n",
+                            unit.attrs,
+                            ident(root),
+                            unit.name
+                        ));
                         for m in &self.macros[u] {
-                            text.push_str(&format!("{}pub use {}::{m};\n", unit.attrs, ident(root)));
+                            text.push_str(&format!(
+                                "{}pub use {}::{m};\n",
+                                unit.attrs,
+                                ident(root)
+                            ));
                         }
                     }
                 }
@@ -566,9 +598,13 @@ impl Refined {
                         } else {
                             let file = format!("{}_root.rs", unit.name);
                             shadows.push((file.clone(), self.shadow_root(u, k, &owned)));
-                            let dir = format!("{}/{}", crate::split::CRATES_DIR, self.crates[k].dir);
+                            let dir =
+                                format!("{}/{}", crate::split::CRATES_DIR, self.crates[k].dir);
                             let _ = dir;
-                            text.push_str(&format!("{}#[path = \"{file}\"]\npub mod {};\n", unit.attrs, unit.name));
+                            text.push_str(&format!(
+                                "{}#[path = \"{file}\"]\npub mod {};\n",
+                                unit.attrs, unit.name
+                            ));
                         }
                     } else {
                         text.push_str(&format!("{}pub mod {} {{\n", unit.attrs, unit.name));
@@ -664,7 +700,10 @@ impl Refined {
         let mut out = BTreeSet::new();
         for p in paths_after(source, "crate::") {
             let first = p.first()?;
-            let u = by_name.get(first.as_str()).copied().or_else(|| self.macro_owner.get(first).copied())?;
+            let u = by_name
+                .get(first.as_str())
+                .copied()
+                .or_else(|| self.macro_owner.get(first).copied())?;
             let n = match self.unit_children.get(&u).and_then(|m| p.get(1).and_then(|s| m.get(s))) {
                 Some(&c) => c,
                 None => self.unit_root[&u],

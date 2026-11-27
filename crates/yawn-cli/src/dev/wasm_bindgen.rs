@@ -67,7 +67,8 @@ pub fn run(tool: &Tool, wasm: &Path, out: &Path, opts: &Options) -> Result<(), S
     match tool {
         Tool::BuiltIn => {
             let (wasm, out) = (wasm.to_path_buf(), out.to_path_buf());
-            let (name, demangle, remove) = (opts.out_name.to_string(), opts.demangle, opts.remove_names);
+            let (name, demangle, remove) =
+                (opts.out_name.to_string(), opts.demangle, opts.remove_names);
             let keep = opts.keep_linker_exports;
             // a bug in the library must not take the whole `yawn dev` down
             std::panic::catch_unwind(move || -> Result<(), String> {
@@ -84,14 +85,23 @@ pub fn run(tool: &Tool, wasm: &Path, out: &Path, opts: &Options) -> Result<(), S
                 b.generate(&out).map_err(|e| format!("{e:#}"))
             })
             .map_err(|_| "wasm-bindgen panicked".to_string())?
-            .map_err(|e| format!("wasm-bindgen failed: {}", e.lines().next().unwrap_or("unknown error")))
+            .map_err(|e| {
+                format!("wasm-bindgen failed: {}", e.lines().next().unwrap_or("unknown error"))
+            })
         }
         Tool::Exe(exe) => {
             let mut cmd = Command::new(exe);
-            cmd.args(["--target", "web", "--no-typescript", "--out-name", opts.out_name, "--out-dir"])
-                .arg(out)
-                .arg(wasm)
-                .stdin(std::process::Stdio::null());
+            cmd.args([
+                "--target",
+                "web",
+                "--no-typescript",
+                "--out-name",
+                opts.out_name,
+                "--out-dir",
+            ])
+            .arg(out)
+            .arg(wasm)
+            .stdin(std::process::Stdio::null());
             if !opts.demangle {
                 cmd.arg("--no-demangle");
             }
@@ -111,7 +121,10 @@ pub fn run(tool: &Tool, wasm: &Path, out: &Path, opts: &Options) -> Result<(), S
                 Ok(())
             } else {
                 let text = String::from_utf8_lossy(&output.stderr);
-                Err(format!("wasm-bindgen failed: {}", text.lines().next().unwrap_or("unknown error")))
+                Err(format!(
+                    "wasm-bindgen failed: {}",
+                    text.lines().next().unwrap_or("unknown error")
+                ))
             }
         }
     }
