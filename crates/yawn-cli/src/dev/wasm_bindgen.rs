@@ -1,6 +1,7 @@
-//! The `wasm-bindgen` CLI the project needs: it must be the same version as the `wasm-bindgen`
-//! crate in its `Cargo.lock`. The one on `PATH` when it matches, else that release downloaded once
-//! into the cache.
+//! The `wasm-bindgen` the project needs: it must be the same version as the `wasm-bindgen` crate in
+//! its `Cargo.lock`. The version built into Yawn when it matches (it runs in this process, and the
+//! prebuilt Linux CLI is a musl binary whose allocator makes it about three times slower), else the
+//! CLI on `PATH` when that matches, else that release downloaded once into the cache.
 
 use super::fetch;
 use std::path::{Path, PathBuf};
@@ -29,6 +30,91 @@ pub fn parse_version(out: &str) -> Option<&str> {
 
 fn install_hint(version: &str) -> String {
     format!("run: cargo install -f wasm-bindgen-cli --version {version}")
+}
+
+/// The version of `wasm-bindgen` that is part of Yawn
+pub const BUILT_IN: &str = "0.2.129";
+
+/// What runs `wasm-bindgen` for a project
+#[derive(Clone)]
+pub enum Tool {
+    BuiltIn,
+    Exe(PathBuf),
+}
+
+/// What to ask of `wasm-bindgen`: a `--target web` bundle called `out_name`
+pub struct Options<'a> {
+    pub out_name: &'a str,
+    /// Keep readable function names in the module (`--no-demangle` turns them off)
+    pub demangle: bool,
+    /// Drop the name section, over half of a dev module
+    pub remove_names: bool,
+    /// Keep the exports the linker added (the function table), which route modules loaded later
+    /// need
+    pub keep_linker_exports: bool,
+}
+
+/// The tool for the project at `root`
+pub fn tool(root: &Path, log: &dyn Fn(&str)) -> Result<Tool, String> {
+    if config::locked_version(root, "wasm-bindgen").as_deref() == Some(BUILT_IN) {
+        return Ok(Tool::BuiltIn);
+    }
+    resolve(root, log).map(Tool::Exe)
+}
+
+/// Writes `<out_name>.js` and `<out_name>_bg.wasm` into `out`
+pub fn run(tool: &Tool, wasm: &Path, out: &Path, opts: &Options) -> Result<(), String> {
+    match tool {
+        Tool::BuiltIn => {
+            let (wasm, out) = (wasm.to_path_buf(), out.to_path_buf());
+            let (name, demangle, remove) = (opts.out_name.to_string(), opts.demangle, opts.remove_names);
+            let keep = opts.keep_linker_exports;
+            // a bug in the library must not take the whole `yawn dev` down
+            std::panic::catch_unwind(move || -> Result<(), String> {
+                let mut b = wasm_bindgen_cli_support::Bindgen::new();
+                b.input_path(&wasm)
+                    .typescript(false)
+                    .demangle(demangle)
+                    // the CLI's default: `init()` without an argument finds `<name>_bg.wasm`
+                    .omit_default_module_path(false)
+                    .remove_name_section(remove)
+                    .keep_lld_exports(keep)
+                    .out_name(&name);
+                b.web(true).map_err(|e| e.to_string())?;
+                b.generate(&out).map_err(|e| format!("{e:#}"))
+            })
+            .map_err(|_| "wasm-bindgen panicked".to_string())?
+            .map_err(|e| format!("wasm-bindgen failed: {}", e.lines().next().unwrap_or("unknown error")))
+        }
+        Tool::Exe(exe) => {
+            let mut cmd = Command::new(exe);
+            cmd.args(["--target", "web", "--no-typescript", "--out-name", opts.out_name, "--out-dir"])
+                .arg(out)
+                .arg(wasm)
+                .stdin(std::process::Stdio::null());
+            if !opts.demangle {
+                cmd.arg("--no-demangle");
+            }
+            if opts.remove_names {
+                cmd.arg("--remove-name-section");
+            }
+            if opts.keep_linker_exports {
+                cmd.arg("--keep-lld-exports");
+            }
+            // The prebuilt CLI is a thread-per-core pass whose extra threads only fight cargo
+            if std::env::var_os("RAYON_NUM_THREADS").is_none() {
+                cmd.env("RAYON_NUM_THREADS", "2");
+            }
+            super::cargo::own_group(&mut cmd);
+            let output = cmd.output().map_err(|e| format!("cannot run wasm-bindgen: {e}"))?;
+            if output.status.success() {
+                Ok(())
+            } else {
+                let text = String::from_utf8_lossy(&output.stderr);
+                Err(format!("wasm-bindgen failed: {}", text.lines().next().unwrap_or("unknown error")))
+            }
+        }
+    }
 }
 
 /// The executable to run for the project at `root`

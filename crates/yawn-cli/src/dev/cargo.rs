@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 #[derive(Default)]
 pub struct KillGroup {
     pids: Mutex<Vec<i32>>,
+    cut: std::sync::atomic::AtomicBool,
 }
 
 impl KillGroup {
@@ -29,10 +30,17 @@ impl KillGroup {
 
     pub fn clear(&self) {
         self.pids().clear();
+        self.cut.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// A kill happened since the last `clear`
+    pub fn cut(&self) -> bool {
+        self.cut.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// SIGKILLs the groups
     pub fn kill(&self) {
+        self.cut.store(true, std::sync::atomic::Ordering::SeqCst);
         let pids = std::mem::take(&mut *self.pids());
         for pid in pids.into_iter().filter(|p| *p > 0) {
             kill_group(pid);
@@ -247,13 +255,27 @@ pub fn run(
     args: &[&str],
     cwd: &Path,
     kill: &KillGroup,
+    on: impl FnMut(&Parsed),
+) -> std::io::Result<CargoRun> {
+    run_with(args, cwd, kill, &[], on)
+}
+
+pub fn run_with(
+    args: &[&str],
+    cwd: &Path,
+    kill: &KillGroup,
+    env: &[(String, String)],
     mut on: impl FnMut(&Parsed),
 ) -> std::io::Result<CargoRun> {
     let start = Instant::now();
     let mut cmd = Command::new("cargo");
-    cmd.args(args)
+    // `--` hands the rest to rustc, so cargo's own flag has to come before it
+    let split = args.iter().position(|a| *a == "--").unwrap_or(args.len());
+    cmd.args(&args[..split])
         .arg("--message-format=json")
+        .args(&args[split..])
         .current_dir(cwd)
+        .envs(env.iter().map(|(k, v)| (k, v)))
         .env("CARGO_TERM_COLOR", "never")
         .env("CARGO_TERM_PROGRESS_WHEN", "always")
         .env("CARGO_TERM_PROGRESS_WIDTH", "400")

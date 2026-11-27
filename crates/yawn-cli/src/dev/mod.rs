@@ -1,9 +1,11 @@
 pub mod cargo;
 pub mod changes;
+pub mod dynamic;
 pub mod fetch;
 mod literals;
 pub mod loading;
 pub mod project;
+pub mod replay;
 pub mod rsx;
 pub mod tailwind;
 pub mod wasm_bindgen;
@@ -101,6 +103,10 @@ struct Dev {
     server_exe: Option<PathBuf>,
     server_rebuilt: bool,
     server_baseline: Option<literals::Snapshot>,
+    snapshot_cache: literals::Cache,
+    lanes: [Option<Arc<Mutex<replay::Lane>>>; 2],
+    dynamic: Option<dynamic::Dynamic>,
+    dropped_dynamic: bool,
     rev: u64,
     pending: ChangeSet,
     saves_seen: Arc<AtomicU64>,
@@ -110,7 +116,7 @@ struct Dev {
     last_progress: std::cell::Cell<Option<Instant>>,
     saves: HashMap<u64, Instant>,
     last_error: Option<String>,
-    bindgen: Option<std::path::PathBuf>,
+    bindgen: Option<wasm_bindgen::Tool>,
     literal_baseline: Option<literals::Snapshot>,
     literal_patch: bool,
     _watcher: Option<RecommendedWatcher>,
@@ -119,12 +125,36 @@ struct Dev {
 impl Dev {
     fn new(src: DevSource, sink: EventSink) -> Dev {
         let (tx, rx) = mpsc::channel();
+        let lane = |name: &str| {
+            replay::Lane::new(&src.project.root, src.project.dev_dir.join(name))
+                .map(|l| Arc::new(Mutex::new(l)))
+        };
+        let wanted = yawn_rsx::project::split_enabled(&src.project.root)
+            && yawn_rsx::project::dynamic_enabled(&src.project.root);
+        let dynamic = if wanted {
+            match dynamic::available() {
+                Ok(()) => Some(dynamic::Dynamic::new(&src.project.root, &src.project.dev_dir)),
+                Err(why) => {
+                    sink.log(Level::Info, "client", format!("route hot-swap off: {why}"));
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let lanes = [
+            lane("replay-client.log"),
+            lane("replay-server.log"),
+        ];
         Dev {
             project: src.project,
             port: src.port,
             sink,
             rx,
             tx,
+            lanes,
+            dynamic,
+            dropped_dynamic: false,
             build_kill: Arc::new(KillGroup::default()),
             server_kill: Arc::new(KillGroup::default()),
             stop: Arc::new(AtomicBool::new(false)),
@@ -135,6 +165,7 @@ impl Dev {
             server_exe: None,
             server_rebuilt: false,
             server_baseline: None,
+            snapshot_cache: Default::default(),
             rev: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())
@@ -572,7 +603,7 @@ impl Dev {
             }
         }
         let snapshot =
-            (cs.client && rsx_ok).then(|| literals::Snapshot::read(&self.project.root)).flatten();
+            (cs.client && rsx_ok).then(|| literals::Snapshot::read(&self.project.root, &mut self.snapshot_cache)).flatten();
         let patch = if !cs.initial
             && !cs.server
             && !cs.restart
@@ -611,11 +642,173 @@ impl Dev {
             }
         }
         self.server_rebuilt = need_server && !cs.server;
-        let client = cs.client && rsx_ok && !patched;
+        if (cs.initial || cs.server || cs.restart)
+            && let Some(d) = self.dynamic.as_mut()
+        {
+            d.reset_exports();
+        }
+        let mut sided = false;
+        let mut early: Option<CargoDone> = None;
+        if cs.client && rsx_ok && !patched && !cs.initial && !cs.server && !cs.restart {
+            if let Some(mut d) = self.dynamic.take() {
+                match d.plan() {
+                    dynamic::Plan::Nothing => {}
+                    dynamic::Plan::Full(why) => self.log(Level::Debug, "client", format!("full build: {why}")),
+                    dynamic::Plan::Leaves(leaves) => {
+                        let t = Instant::now();
+                        self.progress(0, 0, "side module", true);
+                        let kill = self.build_kill.clone();
+                        kill.clear();
+                        let recs: Vec<Option<replay::Recorded>> = leaves
+                            .iter()
+                            .map(|leaf| {
+                                let krate = leaf.package.replace('-', "_");
+                                self.lanes[0]
+                                    .as_ref()
+                                    .and_then(|l| l.lock().unwrap_or_else(|e| e.into_inner()).recorded(&krate))
+                            })
+                            .collect();
+                        let dist = self.project.dist.clone();
+                        let blocked = leaves.iter().any(|l| d.native_blocked(&l.dir));
+                        let side = |d: &mut dynamic::Dynamic| {
+                            let mut out = Vec::new();
+                            for (leaf, rec) in leaves.iter().zip(&recs) {
+                                let mut seen = Vec::new();
+                                let r = match rec {
+                                    Some(rec) => d.build_side(leaf, rec, &dist, &kill, &mut |p| seen.push(p.clone())),
+                                    None => Err(dynamic::SideError::Fallback("no recorded rustc command".into())),
+                                };
+                                let stop = r.is_err();
+                                out.push((seen, r));
+                                if stop {
+                                    break;
+                                }
+                            }
+                            out
+                        };
+                        let results = if need_server && !cs.server && blocked {
+                            self.log(Level::Debug, "server", "full build: the crate has mutable statics");
+                            let (results, done) = std::thread::scope(|scope| {
+                                let job = scope.spawn(|| side(&mut d));
+                                let done = self.run_cargo(false, true, errors, &mut counts);
+                                (job.join().unwrap_or_default(), done)
+                            });
+                            early = Some(done);
+                            results
+                        } else {
+                            side(&mut d)
+                        };
+                        let mut all = true;
+                        for (seen, r) in results {
+                            for p in &seen {
+                                self.report(p, errors, &mut counts, "client");
+                            }
+                            match r {
+                                Ok(()) => {}
+                                Err(dynamic::SideError::Failed) => {
+                                    ok = false;
+                                    sided = true;
+                                    all = false;
+                                }
+                                Err(dynamic::SideError::Fallback(why)) => {
+                                    self.log(Level::Debug, "client", format!("full build: {why}"));
+                                    all = false;
+                                }
+                            }
+                        }
+                        if all {
+                            sided = true;
+                            timings.push(format!("side module {}", fmt_duration(t.elapsed())));
+                            if need_server && !cs.server && !blocked {
+                                let t = Instant::now();
+                                let mut done = true;
+                                for leaf in &leaves {
+                                    let args = self.cargo_args(
+                                        &[
+                                            "build",
+                                            "-p",
+                                            leaf.package.as_str(),
+                                            "--lib",
+                                            "--config",
+                                            "profile.dev.opt-level=0",
+                                        ],
+                                        Some(SERVER_TARGET_DIR),
+                                    );
+                                    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+                                    let env = self.lanes[1]
+                                        .as_ref()
+                                        .map(|l| l.lock().unwrap_or_else(|e| e.into_inner()).env())
+                                        .unwrap_or_default();
+                                    let mut seen = Vec::new();
+                                    let r = d.build_native(
+                                        leaf,
+                                        &args,
+                                        &env,
+                                        &self.project.dev_dir,
+                                        &kill,
+                                        &mut |p| seen.push(p.clone()),
+                                    );
+                                    for p in &seen {
+                                        self.report(p, errors, &mut counts, "server");
+                                    }
+                                    match r {
+                                        Ok(()) => {}
+                                        Err(dynamic::SideError::Failed) => {
+                                            ok = false;
+                                            done = false;
+                                            need_server = false;
+                                            break;
+                                        }
+                                        Err(dynamic::SideError::Fallback(why)) => {
+                                            self.log(
+                                                Level::Debug,
+                                                "server",
+                                                format!("full build: {why}"),
+                                            );
+                                            done = false;
+                                            break;
+                                        }
+                                    }
+                                }
+                                if done {
+                                    need_server = false;
+                                    self.server_rebuilt = false;
+                                    timings.push(format!("server module {}", fmt_duration(t.elapsed())));
+                                    if let Some(next) = snapshot.clone() {
+                                        let _ = literals::write_server(
+                                            &self.project.dev_dir,
+                                            &Default::default(),
+                                        );
+                                        self.server_baseline = Some(next);
+                                    }
+                                }
+                            }
+                            if let Some(next) = snapshot.clone() {
+                                let _ = literals::write(&self.project.dev_dir, &Default::default());
+                                self.literal_baseline = Some(next);
+                            }
+                        }
+                    }
+                }
+                self.dynamic = Some(d);
+            }
+        }
+        let client = cs.client && rsx_ok && !patched && !sided;
         let server = need_server && !self.stopping();
         if client || server {
             self.progress(0, 0, "cargo", true);
-            let done = self.run_cargo(client, server, errors, &mut counts);
+            let mark = errors.len();
+            let mut done = match early.take() {
+                Some(done) if !client => done,
+                _ => self.run_cargo(client, server, errors, &mut counts),
+            };
+            if self.dropped_dynamic {
+                self.dropped_dynamic = false;
+                errors.truncate(mark);
+                let again = self.run_cargo(true, false, errors, &mut counts);
+                done.ok = again.ok;
+                done.client = again.client;
+            }
             ok &= done.ok;
             if let Some((client_ok, cargo_t, bindgen_t)) = done.client {
                 timings.push(format!("client cargo {}", fmt_duration(cargo_t)));
@@ -634,6 +827,9 @@ impl Dev {
             }
         }
         if ok && server {
+            if let Some(d) = self.dynamic.as_mut() {
+                d.reset_native(&self.project.dev_dir);
+            }
             if let Err(error) = literals::write_server(&self.project.dev_dir, &Default::default()) {
                 errors.push(format!("cannot reset the server's literals: {error}"));
                 ok = false;
@@ -786,33 +982,46 @@ impl Dev {
             &["rustc", "--lib", "--target", WASM_TARGET, "--crate-type", "cdylib"],
             Some(CLIENT_TARGET_DIR),
         );
-        // Unoptimized app code compiles much faster; dependencies keep the project's profile
-        client_args
-            .extend(["--config".into(), format!("profile.dev.package.{package}.opt-level=0")]);
-        // Same for the app's own library crates: they are what an edit recompiles
-        for name in yawn_rsx::project::app_packages(&root) {
-            if name != package {
-                client_args
-                    .extend(["--config".into(), format!("profile.dev.package.{name}.opt-level=0")]);
-            }
-        }
+        // The app's crates follow the project's `[profile.dev]`: a size-tuned profile makes the
+        // module wasm-bindgen reads much smaller, and a plain one stays unoptimized
         // The dev server binary is never shipped, so skip the project's size-tuned `[profile.dev]`
-        let server_args = self.cargo_args(
-            &["build", "--bin", &package, "--config", "profile.dev.opt-level=0"],
+        let mut server_args = self.cargo_args(
+            &["rustc", "--bin", &package, "--config", "profile.dev.opt-level=0"],
             Some(SERVER_TARGET_DIR),
         );
+        if let Some(d) = &self.dynamic
+            && let Some(arg) = d.server_link_arg()
+        {
+            server_args.extend(["--".into(), arg]);
+        }
+        // The name section is over half the module and wasm-bindgen would drop it anyway
+        let split = self.split_wasm();
+        if split {
+            client_args.extend(["--".into(), "-Clink-arg=--emit-relocs".into()]);
+        } else if std::env::var_os("YAWN_WASM_NAMES").is_none() {
+            client_args.extend(["--".into(), "-Clink-arg=--strip-all".into()]);
+        }
+        if let Some(d) = &self.dynamic {
+            if !client_args.iter().any(|a| a == "--") {
+                client_args.push("--".into());
+            }
+            client_args.push(d.link_arg());
+        }
+        let pic_env: Vec<(String, String)> = Vec::new();
+        let server_env: Vec<(String, String)> = Vec::new();
         let kill = self.build_kill.clone();
+        kill.clear();
         let (tx, rx) = mpsc::channel::<CargoMsg>();
         let mut done = CargoDone { ok: true, client: None, server: None };
         let mut progress: HashMap<&'static str, (u32, u32)> = HashMap::new();
         std::thread::scope(|scope| {
-            let spawn = |label: &'static str, args: Vec<String>| {
+            let spawn = |label: &'static str, args: Vec<String>, lane: Option<Arc<Mutex<replay::Lane>>>, extra: Vec<(String, String)>| {
                 let (tx, root, kill, package) =
                     (tx.clone(), root.clone(), kill.clone(), package.clone());
                 scope.spawn(move || {
                     let args: Vec<&str> = args.iter().map(String::as_str).collect();
                     let (mut wasm, mut exe) = (None, None);
-                    let run = cargo::run(&args, &root, &kill, |p| {
+                    let mut handle = |p: &Parsed| {
                         if let Parsed::Artifact(a) = p {
                             if label == "client" {
                                 if let Some(f) = a
@@ -825,17 +1034,46 @@ impl Dev {
                             } else if a.name == package {
                                 exe = a.executable.clone().or(exe.take());
                             }
+                            if let Some(l) = &lane
+                                && let Ok(mut l) = l.try_lock()
+                            {
+                                l.note(a);
+                            }
                         }
                         let _ = tx.send(CargoMsg::Event(label, p.clone()));
+                    };
+                    let replayed = lane.as_ref().and_then(|l| {
+                        l.lock().unwrap_or_else(|e| e.into_inner()).try_run(&kill, &mut handle)
                     });
+                    let run = match replayed {
+                        Some(run) => Ok(run),
+                        None => {
+                            let mut env = lane
+                                .as_ref()
+                                .map(|l| {
+                                    let mut l = l.lock().unwrap_or_else(|e| e.into_inner());
+                                    l.begin();
+                                    l.env()
+                                })
+                                .unwrap_or_default();
+                            env.extend(extra);
+                            let run = cargo::run_with(&args, &root, &kill, &env, &mut handle);
+                            if let (Some(l), Ok(r)) = (&lane, &run)
+                                && r.ok
+                            {
+                                l.lock().unwrap_or_else(|e| e.into_inner()).complete();
+                            }
+                            run
+                        }
+                    };
                     let _ = tx.send(CargoMsg::Done(label, Box::new(Finished { run, wasm, exe })));
                 });
             };
             if client {
-                spawn("client", client_args);
+                spawn("client", client_args, self.lanes[0].clone(), pic_env);
             }
             if server {
-                spawn("server", server_args);
+                spawn("server", server_args, self.lanes[1].clone(), server_env);
             }
             drop(tx);
             let mut cut = false;
@@ -911,6 +1149,20 @@ impl Dev {
         if self.stopping() || self.superseded() {
             return (false, run.duration, None);
         }
+        if !run.ok && run.errors == 0 && self.dynamic.is_some() {
+            let why = run.other.iter().rev().find(|l| !l.starts_with("warning")).cloned();
+            self.log(
+                Level::Info,
+                "client",
+                format!(
+                    "route hot-swap off: the position-independent build failed ({})",
+                    why.unwrap_or_default()
+                ),
+            );
+            self.dynamic = None;
+            self.dropped_dynamic = true;
+            return (false, run.duration, None);
+        }
         if !run.ok {
             if run.errors == 0 {
                 for l in run.other.iter().filter(|l| !l.starts_with("warning")).take(6) {
@@ -940,16 +1192,69 @@ impl Dev {
         };
 
         let out = self.project.dist.join("pkg");
+        let mut relinked = false;
+        if let Some(mut d) = self.dynamic.take() {
+            let kill = self.build_kill.clone();
+            let result = match self.lanes[0].as_ref() {
+                Some(lane) => {
+                    let mut lane = lane.lock().unwrap_or_else(|e| e.into_inner());
+                    let root = lane.recorded_root();
+                    d.refresh_exports(
+                        &mut |krate| lane.recorded(krate).map(|r| r.out_dir),
+                        root,
+                        &wasm_path,
+                        &kill,
+                    )
+                }
+                None => Ok(false),
+            };
+            match result {
+                Ok(r) => relinked = r,
+                Err(e) => self.log(Level::Debug, "client", format!("exports: {e}")),
+            }
+            self.dynamic = Some(d);
+        }
         // `fresh` isn't enough: another cargo may have built the wasm just before this run
-        if bundle_is_current(&wasm_path, &out.join(format!("{CLIENT_BUNDLE}_bg.wasm"))) {
+        if !relinked && bundle_is_current(&wasm_path, &out.join(format!("{CLIENT_BUNDLE}_bg.wasm"))) {
             self.log(Level::Debug, "client", "wasm unchanged, skipping wasm-bindgen");
+            if let Some(mut d) = self.dynamic.take() {
+                if !out.join("dyn").join("manifest.json").is_file() {
+                    let _ = d.reset(&self.project.dist);
+                }
+                dynamic::patch_glue(&out);
+                d.remember();
+                self.dynamic = Some(d);
+            }
             return (true, run.duration, None);
         }
         self.progress(0, 0, "client: wasm-bindgen", true);
         let t = Instant::now();
         let result = self.bindgen(&wasm_path, &out);
         match result {
-            Ok(()) => (true, run.duration, Some(t.elapsed())),
+            Ok(()) => {
+                if let Some(mut d) = self.dynamic.take() {
+                    if !dynamic::patch_glue(&out) {
+                        self.log(
+                            Level::Info,
+                            "client",
+                            "route hot-swap off: the wasm-bindgen glue has an unknown shape",
+                        );
+                    } else {
+                        if let Err(e) = d.reset(&self.project.dist) {
+                            self.log(Level::Warn, "client", format!("dynamic modules: {e}"));
+                        }
+                        d.remember();
+                        self.dynamic = Some(d);
+                    }
+                }
+                if self.split_wasm() {
+                    let log = |m: &str| {
+                        self.sink.log(Level::Info, "split", m);
+                    };
+                    crate::split::apply(&out, &wasm_path, &log, true);
+                }
+                (true, run.duration, Some(t.elapsed()))
+            }
             Err(msg) => {
                 errors.push(msg.clone());
                 self.log(Level::Error, "wasm-bindgen", msg);
@@ -959,32 +1264,28 @@ impl Dev {
         }
     }
 
+    /// Whether the client module is cut into a main module and route modules, as `yawn build` does
+    fn split_wasm(&self) -> bool {
+        std::env::var_os("YAWN_DEV_SPLIT").is_some_and(|v| v != "0")
+    }
+
     fn bindgen(&mut self, wasm: &std::path::Path, out: &std::path::Path) -> Result<(), String> {
         if self.bindgen.is_none() {
             let log = |m: &str| {
                 self.sink.log(Level::Info, "wasm-bindgen", m);
             };
-            self.bindgen = Some(wasm_bindgen::resolve(&self.project.root, &log)?);
+            self.bindgen = Some(wasm_bindgen::tool(&self.project.root, &log)?);
         }
         std::fs::create_dir_all(out)
             .map_err(|e| format!("cannot create {}: {e}", out.display()))?;
-        let mut cmd = Command::new(self.bindgen.as_ref().expect("just set"));
-        cmd.args(["--target", "web", "--no-typescript", "--out-name", CLIENT_BUNDLE, "--out-dir"])
-            .arg(out)
-            .arg(wasm)
-            .stdin(Stdio::null());
-        // Strip the name section (over half the module); YAWN_WASM_NAMES=1 keeps it
-        if std::env::var_os("YAWN_WASM_NAMES").is_none() {
-            cmd.arg("--remove-name-section");
-        }
-        cargo::own_group(&mut cmd);
-        let output = cmd.output().map_err(|e| format!("cannot run wasm-bindgen: {e}"))?;
-        if output.status.success() {
-            Ok(())
-        } else {
-            let text = String::from_utf8_lossy(&output.stderr);
-            Err(format!("wasm-bindgen failed: {}", text.lines().next().unwrap_or("unknown error")))
-        }
+        let options = wasm_bindgen::Options {
+            out_name: CLIENT_BUNDLE,
+            demangle: !self.split_wasm(),
+            // YAWN_WASM_NAMES=1 keeps the name section
+            remove_names: !self.split_wasm() && std::env::var_os("YAWN_WASM_NAMES").is_none(),
+            keep_linker_exports: self.dynamic.is_some(),
+        };
+        wasm_bindgen::run(self.bindgen.as_ref().expect("just set"), wasm, out, &options)
     }
 
     fn finish_server(
@@ -1018,6 +1319,31 @@ impl Dev {
         }
         match exe {
             Some(e) => {
+                if let Some(mut d) = self.dynamic.take() {
+                    if let Some(lane) = self.lanes[1].as_ref() {
+                        let mut lane = lane.lock().unwrap_or_else(|x| x.into_inner());
+                        let bin = e
+                            .file_stem()
+                            .and_then(|n| n.to_str())
+                            .and_then(|n| lane.recorded_bin(&n.replace('-', "_")));
+                        let kill = self.build_kill.clone();
+                        let r = d.refresh_server_exports(
+                            &mut |krate| lane.recorded(krate).map(|r| r.out_dir),
+                            bin,
+                            &e,
+                            &kill,
+                        );
+                        match r {
+                            Ok(relinked) => self.log(
+                                Level::Debug,
+                                "server",
+                                format!("exports: relinked={relinked}"),
+                            ),
+                            Err(err) => self.log(Level::Debug, "server", format!("exports: {err}")),
+                        }
+                    }
+                    self.dynamic = Some(d);
+                }
                 self.server_exe = Some(e);
                 (true, run.duration)
             }

@@ -1,6 +1,7 @@
 use quote::ToTokens;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 use syn::visit_mut::{self, VisitMut};
 
 #[derive(Default)]
@@ -57,8 +58,15 @@ impl VisitMut for Literals {
 #[derive(Default, Clone)]
 pub struct Snapshot(BTreeMap<PathBuf, (String, Vec<(String, String)>)>, BTreeMap<PathBuf, String>);
 
+/// What the last [`Snapshot::read`] saw, so the next one parses only the files that changed
+#[derive(Default)]
+pub struct Cache {
+    snapshot: Snapshot,
+    stamps: HashMap<PathBuf, (SystemTime, u64)>,
+}
+
 impl Snapshot {
-    pub fn read(root: &Path) -> Option<Self> {
+    pub fn read(root: &Path, cache: &mut Cache) -> Option<Self> {
         fn walk(dir: &Path, files: &mut Vec<PathBuf>) -> Option<()> {
             for entry in std::fs::read_dir(dir).ok()? {
                 let path = entry.ok()?.path();
@@ -77,11 +85,25 @@ impl Snapshot {
             files.push(root.join(".yawn/client.rs"));
         }
         let mut out = Self::default();
+        let mut stamps = HashMap::new();
+        let mut old = std::mem::take(cache);
         for path in files {
-            let source = std::fs::read_to_string(&path).ok()?;
-            out.1.insert(path.clone(), server_form(&source)?);
-            out.0.insert(path, normalize(&source)?);
+            let meta = std::fs::metadata(&path).ok()?;
+            let stamp = (meta.modified().ok()?, meta.len());
+            if old.stamps.get(&path) == Some(&stamp)
+                && let (Some(code), Some(server)) =
+                    (old.snapshot.0.remove(&path), old.snapshot.1.remove(&path))
+            {
+                out.0.insert(path.clone(), code);
+                out.1.insert(path.clone(), server);
+            } else {
+                let source = std::fs::read_to_string(&path).ok()?;
+                out.1.insert(path.clone(), server_form(&source)?);
+                out.0.insert(path.clone(), normalize(&source)?);
+            }
+            stamps.insert(path, stamp);
         }
+        *cache = Cache { snapshot: out.clone(), stamps };
         Some(out)
     }
 

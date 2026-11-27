@@ -12,11 +12,7 @@ rust-version.workspace = true
 [[bin]]
 name = "yawn"
 path = "src/main.rs"
-# the library `yawn` (package yawn-web) owns that documentation name
 doc = false
-
-# `cargo binstall yawn-cli` downloads the archive that the release workflow attaches to the GitHub
-# release of the tag, instead of compiling.
 [package.metadata.binstall]
 pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }{ archive-suffix }"
 bin-dir = "{ bin }{ binary-ext }"
@@ -32,6 +28,11 @@ yawn-web = { workspace = true, features = ["config"] }
 yawn-rsx.workspace = true
 notify = "9"
 serde_json = "1"
+brotli = "8"
+zstd = "0.13"
+sha2 = "0.10"
+yawn-split = { path = "../yawn-split", version = "0.1.0" }
+wasm-bindgen-cli-support = "=0.2.129"
 syn = { version = "3", features = ["full", "visit-mut"] }
 quote = "1"
 

@@ -136,6 +136,25 @@ pub fn run(inputs: &Inputs) -> std::io::Result<Manifest> {
         manifest.insert("/pkg/app_bg.wasm", served);
     }
 
+    let mut chunk_files: Vec<String> = Vec::new();
+    if inputs.pkg.is_dir() {
+        let mut names: Vec<String> = fs::read_dir(inputs.pkg)?
+            .flatten()
+            .filter_map(|e| e.file_name().into_string().ok())
+            .filter(|n| n.starts_with("chunk_") && n.ends_with(".wasm"))
+            .collect();
+        names.sort();
+        for name in names {
+            let bytes = fs::read(inputs.pkg.join(&name))?;
+            let url = format!("/pkg/{name}");
+            let served = hashed_name(&url, &content_hash(&bytes));
+            write(inputs.out, &served, &bytes)?;
+            write(inputs.out, &url, &bytes)?;
+            manifest.insert(url, served);
+            chunk_files.push(name);
+        }
+    }
+
     // 2. stylesheets: their references are known now
     let mut sheets: Vec<(String, PathBuf)> =
         css.iter().map(|e| (e.url.clone(), e.source.clone())).collect();
@@ -166,6 +185,12 @@ pub fn run(inputs: &Inputs) -> std::io::Result<Manifest> {
             let file = served.rsplit('/').next().unwrap_or(served);
             text = text.replace("app_bg.wasm", file);
         }
+        for name in &chunk_files {
+            if let Some(served) = manifest.get(&format!("/pkg/{name}")) {
+                let file = served.rsplit('/').next().unwrap_or(served);
+                text = text.replace(&format!("\"{name}\""), &format!("\"{file}\""));
+            }
+        }
         let served = hashed_name("/pkg/app.js", &content_hash(text.as_bytes()));
         write(inputs.out, &served, text.as_bytes())?;
         write(inputs.out, "/pkg/app.js", fs::read(&js)?.as_slice())?;
@@ -179,7 +204,7 @@ pub fn run(inputs: &Inputs) -> std::io::Result<Manifest> {
             let known = matches!(
                 e.url.as_str(),
                 "/pkg/app.js" | "/pkg/app_bg.wasm" | "/pkg/tailwind.css" | "/pkg/rsx.css"
-            );
+            ) || e.url.starts_with("/pkg/chunk_");
             if !known {
                 write(inputs.out, &e.url, &fs::read(&e.source)?)?;
             }

@@ -2,7 +2,7 @@ use crate::cli::BuildArgs;
 use crate::dev::project::Project;
 use crate::dev::{rsx, tailwind::Tailwind, wasm_bindgen};
 use crate::error::CliError;
-use crate::{finalize, prerender};
+use crate::{finalize, optimize, prerender, split};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 use std::time::Instant;
@@ -24,9 +24,10 @@ fn cargo_args(root: &Path, args: &[&str], target_dir: &str) -> Vec<String> {
     v
 }
 
-fn cargo(root: &Path, args: &[&str], target_dir: &str, what: &str) -> Result<(), CliError> {
+fn cargo(root: &Path, args: &[&str], target_dir: &str, what: &str, tail: &[&str]) -> Result<(), CliError> {
     let status = Command::new("cargo")
         .args(cargo_args(root, args, target_dir))
+        .args(tail)
         .current_dir(root)
         .stdin(Stdio::null())
         .status()
@@ -72,7 +73,8 @@ fn build_client(root: &Path, project: &Project, pkg: &Path) -> Result<(), CliErr
             .collect()
     };
     args.extend(profile.iter().map(String::as_str));
-    cargo(root, &args, CLIENT_TARGET_DIR, "client build")?;
+    let tail: &[&str] = if std::env::var_os("YAWN_NO_SPLIT").is_some() { &[] } else { &["--", "-Clink-arg=--emit-relocs"] };
+    cargo(root, &args, CLIENT_TARGET_DIR, "client build", tail)?;
     let lib = if root.join(yawn_rsx::manifest::MANIFEST).is_file() {
         yawn_rsx::manifest::LIB_NAME.to_string()
     } else {
@@ -85,22 +87,22 @@ fn build_client(root: &Path, project: &Project, pkg: &Path) -> Result<(), CliErr
             .hint("the project needs a library (src/lib.rs, or src/main.rsx)"));
     }
     let log = |m: &str| eprintln!("      {m}");
-    let exe = wasm_bindgen::resolve(root, &log).map_err(CliError::new)?;
-    let bindgen = Command::new(&exe)
-        .args(["--target", "web", "--no-typescript", "--out-name", "app", "--out-dir"])
-        .arg(pkg)
-        .arg(&wasm)
-        .stdin(Stdio::null())
-        .status()
-        .map_err(|e| CliError::new(format!("cannot run {}: {e}", exe.display())))?;
-    if !bindgen.success() {
-        return Err(CliError::new(format!("wasm-bindgen failed ({bindgen})")));
+    let after = Instant::now();
+    let tool = wasm_bindgen::tool(root, &log).map_err(CliError::new)?;
+    let options =
+        wasm_bindgen::Options { out_name: "app", demangle: false, remove_names: false, keep_linker_exports: false };
+    wasm_bindgen::run(&tool, &wasm, pkg, &options).map_err(CliError::new)?;
+    log(&format!("wasm-bindgen {:.1}s", after.elapsed().as_secs_f32()));
+    let split_at = Instant::now();
+    if !split::apply(pkg, &wasm, &log, false) {
+        optimize::wasm_opt(&pkg.join("app_bg.wasm"), &log);
     }
+    log(&format!("split and wasm-opt {:.1}s", split_at.elapsed().as_secs_f32()));
     Ok(())
 }
 
 fn build_server(root: &Path, project: &Project) -> Result<PathBuf, CliError> {
-    cargo(root, &["build", "--release", "--bin", &project.package], "target", "server build")?;
+    cargo(root, &["build", "--release", "--bin", &project.package], "target", "server build", &[])?;
     let exe = root.join("target/release").join(&project.package);
     if !exe.is_file() {
         return Err(CliError::new(format!("cargo built no {}", exe.display())));
@@ -175,6 +177,19 @@ pub fn run(args: &BuildArgs) -> Result<ExitCode, CliError> {
         eprintln!();
         eprintln!("host it:  {}", public.display());
         return Ok(ExitCode::SUCCESS);
+    }
+    step("compressing with brotli");
+    let packing = Instant::now();
+    let packed = optimize::precompress(&public)?;
+    eprintln!("      {packed} file(s) in {:.1}s", packing.elapsed().as_secs_f32());
+    if std::env::var_os("YAWN_DICTIONARY").is_none_or(|v| v != "0") {
+        let store = root.join("target").join("yawn").join("dictionaries");
+        let started_dict = Instant::now();
+        let (whole, deltas) = optimize::dictionary_chunks(&public.join("pkg"), &store)?;
+        eprintln!(
+            "      {whole} chunk(s) against the main module, {deltas} file(s) against earlier builds ({:.1}s)",
+            started_dict.elapsed().as_secs_f32()
+        );
     }
     let server = out.join(&project.package);
     std::fs::copy(&exe, &server)?;
