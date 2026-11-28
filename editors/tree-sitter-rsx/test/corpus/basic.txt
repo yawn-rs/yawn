@@ -144,3 +144,36 @@ pub component Card() {
         (string_content))
       (end_tag
         (tag_name)))))
+
+==================
+generic component
+==================
+component List<T, F>(items: Vec<T>, row: F)
+where
+    T: Clone,
+    F: Fn(T) -> View,
+{
+    view { <ul /> }
+}
+
+---
+
+(source_file
+  (component
+    name: (component_name)
+    (type_parameters
+      (rust_type)
+      (rust_type))
+    (params
+      (param
+        name: (param_name)
+        type: (rust_type))
+      (param
+        name: (param_name)
+        type: (rust_type)))
+    (where_clause
+      (rust_type)
+      (rust_type))
+    (view_block
+      (self_closing_tag
+        (tag_name)))))

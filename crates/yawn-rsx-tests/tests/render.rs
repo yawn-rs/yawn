@@ -1,5 +1,5 @@
 use yawn::ui::mock::{MockApp, mount};
-use yawn_rsx_tests::{counter, defaults, misc};
+use yawn_rsx_tests::{counter, defaults, generics, misc};
 
 fn text(app: &MockApp, sel: &str) -> String {
     app.text(app.find(sel))
@@ -314,6 +314,16 @@ fn props_left_out_take_their_defaults() {
     let html = app.html();
     assert!(html.contains("<span class=\"chip plain\">one</span>"), "{html}");
     assert!(html.contains("chip warn loud"), "{html}");
+}
+
+#[test]
+fn generic_components_take_their_types_from_the_props() {
+    let app = mount(generics::Uses::default());
+    let html = app.html();
+    assert!(html.contains("<span class=\"labeled\">value: 3</span>"), "{html}");
+    assert!(html.contains("<span class=\"labeled\">name: x</span>"), "{html}");
+    assert!(html.contains("<p class=\"joined\">#1, #2, #3</p>"), "{html}");
+    assert!(html.contains("<b class=\"repeated\">aa</b>"), "{html}");
 }
 
 #[test]

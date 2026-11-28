@@ -104,10 +104,10 @@ takes about 17% more). Method, caveats and every number are in [`bench/results.m
 
 | works | not yet |
 |---|---|
-| `.rsx` components, signals, memos, effects, keyed lists, slots, prop defaults | generics on components |
-| SSR with hydration, head tags, data loading | `match`, `while` and `loop` in a view |
-| folder routing with layouts and params | CSS scoped to a component (`style { }` is global) |
-| API routes in `src/api/`, server functions | a stable API |
+| `.rsx` components (generic ones too), signals, memos, effects, keyed lists, slots, prop defaults | `match`, `while` and `loop` in a view |
+| SSR with hydration, head tags, data loading | CSS scoped to a component (`style { }` is global) |
+| folder routing with layouts and params | a stable API |
+| API routes in `src/api/`, server functions | |
 | `yawn dev` with state kept across rebuilds, `yawn build`, Tailwind, hashed assets | |
 | language server, tree-sitter grammar, Zed extension | |
 

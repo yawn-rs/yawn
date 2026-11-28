@@ -64,6 +64,12 @@ pub fn add(parent: impl Parent, view: impl Into<View>) {
     parent.add(view.into());
 }
 
+/// Returns `props`. The generated `<List items={v} />` passes the marker its `List::__default_sep`
+/// calls took, so the `T` of `List<T>` they need is the one `items` decides
+pub fn with_defaults<C>(_: std::marker::PhantomData<C>, props: C) -> C {
+    props
+}
+
 pub fn element(tag: &str) -> NodeId {
     track(with_backend(|b| b.create_element(tag)))
 }

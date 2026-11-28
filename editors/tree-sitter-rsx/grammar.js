@@ -32,7 +32,9 @@ module.exports = grammar({
       optional('pub'),
       'component',
       field('name', $.component_name),
+      optional($.type_parameters),
       optional($.params),
+      optional($.where_clause),
       '{',
       optional($.rust_setup),
       optional($.style_block),
@@ -42,6 +44,11 @@ module.exports = grammar({
     ),
 
     component_name: _ => /[A-Z][A-Za-z0-9_]*/,
+
+    // `<T: Clone, F: Fn(T) -> View>`, each parameter an opaque token like a prop's type
+    type_parameters: $ => seq('<', $.rust_type, repeat(seq(',', $.rust_type)), optional(','), '>'),
+
+    where_clause: $ => seq('where', $.rust_type, repeat(seq(',', $.rust_type)), optional(',')),
 
     params: $ => seq('(', optional(seq($.param, repeat(seq(',', $.param)), optional(','))), ')'),
 

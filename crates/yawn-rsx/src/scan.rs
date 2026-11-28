@@ -205,6 +205,32 @@ pub fn find_close(s: &str, open: usize, limit: usize) -> Result<usize, Diagnosti
         .label(format!("this `{}` is never closed", o as char)))
 }
 
+/// The `>` that closes the `<` at `open`. The `>` of `->` doesn't count, and neither does anything
+/// in brackets (`[u8; N >> 1]`)
+pub fn find_angle_close(s: &str, open: usize, limit: usize) -> Result<usize, Diagnostic> {
+    let mut depth = 0usize;
+    let mut i = open;
+    while i < limit {
+        let (kind, end) = token(&s[..limit], i)?;
+        match kind {
+            Kind::Open(_) => {
+                i = find_close(s, i, limit)? + 1;
+                continue;
+            }
+            Kind::Punct if &s[i..end] == "<" => depth += 1,
+            Kind::Punct if &s[i..end] == ">" && !s[..i].ends_with('-') => {
+                depth -= 1;
+                if depth == 0 {
+                    return Ok(i);
+                }
+            }
+            _ => {}
+        }
+        i = end;
+    }
+    Err(Diagnostic::new("unclosed `<`", open..open + 1).label("this `<` is never closed"))
+}
+
 pub fn closer_of(open: u8) -> u8 {
     match open {
         b'(' => b')',

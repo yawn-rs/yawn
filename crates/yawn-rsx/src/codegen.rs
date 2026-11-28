@@ -306,7 +306,12 @@ impl Gen<'_> {
         if c.params.is_empty() {
             w.raw("#[derive(Default)]\n");
         }
-        w.raw(&format!("pub struct {} {{", c.name));
+        w.raw(&format!("pub struct {}", c.name));
+        if let Some(g) = &c.generics {
+            w.verbatim(g);
+        }
+        where_clause(w, c);
+        w.raw(" {");
         w.indent += 1;
         for p in &c.params {
             w.nl();
@@ -320,10 +325,17 @@ impl Gen<'_> {
         w.origin(c.name_span.start);
         w.raw("}\n\n");
         if c.params.iter().any(|p| p.default.is_some()) {
-            w.raw(&format!("#[allow(non_snake_case, clippy::all)]\nimpl {} {{\n", c.name));
+            w.raw("#[allow(non_snake_case, clippy::all)]\n");
+            impl_head(w, c, "");
+            w.raw("\n");
             for p in &c.params {
                 if let Some(d) = &p.default {
-                    w.raw(&format!("    #[doc(hidden)]\n    pub fn __default_{}() -> ", p.name));
+                    // the marker ties `Self` to the props being built: `List::__default_sep()`
+                    // alone leaves the `T` of `List<T>` unknown when `sep` doesn't mention it
+                    w.raw(&format!(
+                        "    #[doc(hidden)]\n    pub fn __default_{}(_: ::core::marker::PhantomData<Self>) -> ",
+                        p.name
+                    ));
                     w.verbatim(&p.ty);
                     w.raw(" { ");
                     w.origin(d.start);
@@ -334,17 +346,17 @@ impl Gen<'_> {
             w.raw("}\n\n");
         }
         w.raw("#[allow(unused_parens, unused_braces, unused_mut, clippy::all)]\n");
-        let dynamic = dynamic();
+        // the registry is filled at startup, before any `T` is known. The code of `List<u8>` is
+        // in whatever renders it, and a side module with that code swaps it
+        let dynamic = dynamic() && c.generics.is_none() && c.where_clause.is_none();
         if dynamic {
             w.raw(&format!(
                 "impl {} {{\n    #[doc(hidden)]\n    pub fn __yawn_body(self) -> ::yawn::ui::View {{\n        {BODY_BEGIN}",
                 c.name
             ));
         } else {
-            w.raw(&format!(
-                "impl ::yawn::ui::Component for {} {{\n    fn render(self) -> ::yawn::ui::View {{",
-                c.name
-            ));
+            impl_head(w, c, "::yawn::ui::Component for ");
+            w.raw("\n    fn render(self) -> ::yawn::ui::View {");
         }
         w.indent = 2;
         if !c.params.is_empty() {
@@ -1129,9 +1141,52 @@ impl Gen<'_> {
     }
 
     fn component_use(&mut self, e: &Element, sink: &str) -> Result<()> {
+        // what the caller wrote between the tags: children that name a slot (`slot="x"`, or the
+        // contents of `<template slot="x">`) fill that prop, everything else is `children`
+        let mut named: Vec<(String, Vec<Node>)> = Vec::new();
+        let mut rest: Vec<Node> = Vec::new();
+        for n in &e.children {
+            let Node::Element(c) = n else {
+                rest.push(n.clone());
+                continue;
+            };
+            let Some(slot) = self.slot_of(c) else {
+                rest.push(n.clone());
+                continue;
+            };
+            let nodes = if c.name == "template" && !c.is_component {
+                c.children.clone()
+            } else {
+                let mut inner = c.clone();
+                inner.attrs.retain(|a| a.name != "slot");
+                vec![Node::Element(inner)]
+            };
+            match named.iter_mut().find(|(k, _)| *k == slot) {
+                Some((_, all)) => all.extend(nodes),
+                None => named.push((slot, nodes)),
+            }
+        }
+        // props the caller left out take the default their component declared; a prop a slot fills is
+        // not left out
+        let known = self.known;
+        let last = e.name.rsplit("::").next().unwrap_or(&e.name);
+        let filled = |n: &str| {
+            e.attrs.iter().any(|a| a.name == n)
+                || named.iter().any(|(k, _)| k == n)
+                || (n == "children" && !rest.is_empty())
+        };
+        let left_out: Vec<&String> =
+            known.get(last).into_iter().flatten().filter(|n| !filled(n)).collect();
+        let marker = (!left_out.is_empty()).then(|| self.fresh("__d"));
         self.w.nl();
         self.w.origin(e.name_span.start);
-        self.w.raw(&format!("{RT}::add({sink}, ::yawn::ui::Component::render({} {{", e.name));
+        self.w.raw(&format!("{RT}::add({sink}, ::yawn::ui::Component::render("));
+        if let Some(d) = &marker {
+            self.w.raw(&format!(
+                "{{ let {d} = ::core::marker::PhantomData; {RT}::with_defaults({d}, "
+            ));
+        }
+        self.w.raw(&format!("{} {{", e.name));
         self.w.indent += 1;
         for a in &e.attrs {
             if a.name == "ref" {
@@ -1162,43 +1217,10 @@ impl Gen<'_> {
             }
             self.w.raw(",");
         }
-        // what the caller wrote between the tags: children that name a slot (`slot="x"`, or the
-        // contents of `<template slot="x">`) fill that prop, everything else is `children`
-        let mut named: Vec<(String, Vec<Node>)> = Vec::new();
-        let mut rest: Vec<Node> = Vec::new();
-        for n in &e.children {
-            let Node::Element(c) = n else {
-                rest.push(n.clone());
-                continue;
-            };
-            let Some(slot) = self.slot_of(c) else {
-                rest.push(n.clone());
-                continue;
-            };
-            let nodes = if c.name == "template" && !c.is_component {
-                c.children.clone()
-            } else {
-                let mut inner = c.clone();
-                inner.attrs.retain(|a| a.name != "slot");
-                vec![Node::Element(inner)]
-            };
-            match named.iter_mut().find(|(k, _)| *k == slot) {
-                Some((_, all)) => all.extend(nodes),
-                None => named.push((slot, nodes)),
-            }
-        }
-        // props the caller left out take the default their component declared; a prop a slot fills is
-        // not left out
-        let last = e.name.rsplit("::").next().unwrap_or(&e.name);
-        if let Some(left_out) = self.known.get(last) {
-            let filled = |n: &str| {
-                e.attrs.iter().any(|a| a.name == n)
-                    || named.iter().any(|(k, _)| k == n)
-                    || (n == "children" && !rest.is_empty())
-            };
-            for name in left_out.iter().filter(|n| !filled(n)) {
+        if let Some(d) = &marker {
+            for name in left_out {
                 self.w.nl();
-                self.w.raw(&format!("{name}: {}::__default_{name}(),", e.name));
+                self.w.raw(&format!("{name}: {}::__default_{name}({d}),", e.name));
             }
         }
         for (field, nodes) in named
@@ -1222,7 +1244,7 @@ impl Gen<'_> {
         self.w.indent -= 1;
         self.w.nl();
         self.w.origin(e.name_span.start);
-        self.w.raw("}));");
+        self.w.raw(if marker.is_some() { "}) }));" } else { "}));" });
         Ok(())
     }
 }
@@ -1237,6 +1259,27 @@ pub const BODY_BEGIN: &str = "// yawn:body-begin";
 pub const BODY_END: &str = "// yawn:body-end";
 
 static DYNAMIC: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// `impl<T: Bound> {what}Name<T> where .. {` with the bounds as written, so an error in one points
+/// at the `.rsx` file
+fn impl_head(w: &mut Writer, c: &Component, what: &str) {
+    w.raw("impl");
+    if let Some(g) = &c.generics {
+        w.verbatim(g);
+    }
+    w.raw(&format!(" {what}{}{}", c.name, c.generic_args));
+    where_clause(w, c);
+    w.raw(" {");
+}
+
+fn where_clause(w: &mut Writer, c: &Component) {
+    if let Some(wc) = &c.where_clause {
+        w.raw(" ");
+        w.verbatim(wc);
+        // it may end in a `//` comment
+        w.raw("\n");
+    }
+}
 
 /// Makes generated components render through `yawn::dynamic`, so a dev build can replace a
 /// component's body without rebuilding the app

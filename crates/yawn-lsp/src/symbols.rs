@@ -36,28 +36,35 @@ pub fn components(src: &str) -> Vec<Comp> {
                     i = end;
                     continue;
                 }
-                let (mut j, mut paren, mut open) = (n1, 0i32, None);
-                let mut params = (n1, n1);
+                let (mut j, mut open) = (n1, None);
+                // the props are the parentheses right after the generics: `<F: Fn(u8)>` and
+                // `where F: Fn(u8)` have their own
+                if let Ok(g) = scan::skip_trivia(src, n1, src.len())
+                    && src[g..].starts_with('<')
+                    && let Ok(close) = scan::find_angle_close(src, g, src.len())
+                {
+                    j = close + 1;
+                }
+                let mut params = (j, j);
+                if let Ok(p) = scan::skip_trivia(src, j, src.len())
+                    && src[p..].starts_with('(')
+                    && let Ok(close) = scan::find_close(src, p, src.len())
+                {
+                    params = (p + 1, close);
+                    j = close + 1;
+                }
                 while j < src.len() {
                     let Ok((k, e)) = scan::token(src, j) else {
                         break;
                     };
                     match k {
-                        Kind::Open(b'(') => {
-                            if paren == 0 {
-                                params.0 = e;
-                            }
-                            paren += 1;
-                        }
-                        Kind::Close(b')') => {
-                            paren -= 1;
-                            if paren == 0 {
-                                params.1 = j;
-                            }
-                        }
-                        Kind::Open(b'{') if paren == 0 => {
+                        Kind::Open(b'{') => {
                             open = Some(j);
                             break;
+                        }
+                        Kind::Open(_) => {
+                            j = scan::find_close(src, j, src.len()).map_or(src.len(), |c| c + 1);
+                            continue;
                         }
                         _ => {}
                     }
@@ -150,6 +157,14 @@ mod tests {
         assert_eq!(src[c[0].setup.0..c[0].setup.1].trim(), "let x = 1;");
         assert_eq!(c[1].name, "Other");
         assert!(src[c[1].setup.0..c[1].setup.1].trim().is_empty());
+    }
+
+    #[test]
+    fn params_of_a_generic_component() {
+        let src = "component List<F: Fn(u8) -> u8>(items: Vec<u8>, f: F) where F: Fn(u8) { let a = 1; view { <b/> } }";
+        let c = components(src);
+        assert_eq!(c[0].params, "items: Vec<u8>, f: F");
+        assert_eq!(src[c[0].setup.0..c[0].setup.1].trim(), "let a = 1;");
     }
 
     #[test]
