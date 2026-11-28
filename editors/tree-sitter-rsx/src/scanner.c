@@ -150,7 +150,7 @@ static bool scan_type(TSLexer *l) {
   l->mark_end(l);
   while (!eof(l)) {
     int32_t c = l->lookahead;
-    if (depth == 0 && (c == ',' || c == ')' || c == '>')) return marked;
+    if (depth == 0 && (c == ',' || c == ')' || c == '>' || c == '{')) return marked;
     if (c == '"') { adv(l); skip_string(l, c); marked = true; l->mark_end(l); continue; }
     if (c == '\'') { skip_char_or_lifetime(l); marked = true; l->mark_end(l); continue; }
     if (c == '-') {

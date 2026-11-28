@@ -148,7 +148,11 @@ pub component Card() {
 ==================
 generic component
 ==================
-component List<T: Clone, F: Fn(T) -> View>(items: Vec<T>, row: F) {
+component List<T, F>(items: Vec<T>, row: F)
+where
+    T: Clone,
+    F: Fn(T) -> View,
+{
     view { <ul /> }
 }
 
@@ -167,6 +171,9 @@ component List<T: Clone, F: Fn(T) -> View>(items: Vec<T>, row: F) {
       (param
         name: (param_name)
         type: (rust_type)))
+    (where_clause
+      (rust_type)
+      (rust_type))
     (view_block
       (self_closing_tag
         (tag_name)))))

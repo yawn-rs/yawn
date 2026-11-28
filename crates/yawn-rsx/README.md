@@ -32,7 +32,7 @@ component Counter() {                 // props are fields: `component Card(title
 |---|---|
 | `<tag attr="text">` | HTML element; void tags (`input`, `br`, ...) need no closing tag |
 | `<Name prop={expr} flag />` | component: a struct literal `Name { prop: expr, flag: true }`, rendered once. A string value goes through `Into`, so `title="x"` fills a `String` or `&str` |
-| `component List<T: Clone>(items: Vec<T>)` | generic component: the props the caller passes decide `T` (`<List items={vec![1, 2]} />`), so each parameter needs a prop whose type mentions it. Bounds go inside `<>` (`where` isn't supported) and a parameter takes no default (`<T = u8>`). In `yawn dev` an edit of a generic component rebuilds the app: its body can't be swapped in place like the others' |
+| `component List<T: Clone>(items: Vec<T>)` | generic component: the props the caller passes decide `T` (`<List items={vec![1, 2]} />`), so each parameter has to be in a prop's type. Bounds go inside `<>` or in `where` after the props, and a parameter takes no default (`<T = u8>`). Its code is compiled where it's rendered, so in `yawn dev` an edit is swapped in place only when no other file uses the component; otherwise the app is rebuilt |
 | `"text {expr} {n:03} {{"` | string; `{expr}` interpolates (`format!` specs allowed). Without `{}` it's static |
 | `{expr}` | a child: numbers, strings, signals/memos become a text node that follows them; a `View` or `Children` is inserted once |
 | `name="x {expr}"`, `name={expr}` | attribute; reactive when it reads signals. `bool` sets/removes a valueless attribute, `Option` `None` removes it |

@@ -12,12 +12,22 @@ component Joined<T, F: Fn(T) -> String>(items: Vec<T>, show: F, sep: String = ",
     view { <p class="joined">"{text}"</p> }
 }
 
+/// The bounds in a `where` clause
+component Repeated<T>(value: T, times: usize = 2)
+where
+    T: Display, // what the view prints
+{
+    let text = value.to_string().repeat(times);
+    view { <b class="repeated">"{text}"</b> }
+}
+
 component Uses() {
     view {
         <div>
             <Labeled value={3} />
             <Labeled value={"x"} label="name" />
             <Joined items={vec![1, 2, 3]} show={|n: i32| format!("#{n}")} />
+            <Repeated value={'a'} />
         </div>
     }
 }

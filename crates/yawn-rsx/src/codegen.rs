@@ -310,6 +310,7 @@ impl Gen<'_> {
         if let Some(g) = &c.generics {
             w.verbatim(g);
         }
+        where_clause(w, c);
         w.raw(" {");
         w.indent += 1;
         for p in &c.params {
@@ -325,8 +326,8 @@ impl Gen<'_> {
         w.raw("}\n\n");
         if c.params.iter().any(|p| p.default.is_some()) {
             w.raw("#[allow(non_snake_case, clippy::all)]\n");
-            impl_head(w, c);
-            w.raw(&format!("{}{} {{\n", c.name, c.generic_args));
+            impl_head(w, c, "");
+            w.raw("\n");
             for p in &c.params {
                 if let Some(d) = &p.default {
                     // the marker ties `Self` to the props being built: `List::__default_sep()`
@@ -345,20 +346,17 @@ impl Gen<'_> {
             w.raw("}\n\n");
         }
         w.raw("#[allow(unused_parens, unused_braces, unused_mut, clippy::all)]\n");
-        // the registry is filled at startup, before any `T` is known: an edit of a generic
-        // component rebuilds the app
-        let dynamic = dynamic() && c.generics.is_none();
+        // the registry is filled at startup, before any `T` is known. The code of `List<u8>` is
+        // in whatever renders it, and a side module with that code swaps it
+        let dynamic = dynamic() && c.generics.is_none() && c.where_clause.is_none();
         if dynamic {
             w.raw(&format!(
                 "impl {} {{\n    #[doc(hidden)]\n    pub fn __yawn_body(self) -> ::yawn::ui::View {{\n        {BODY_BEGIN}",
                 c.name
             ));
         } else {
-            impl_head(w, c);
-            w.raw(&format!(
-                "::yawn::ui::Component for {}{} {{\n    fn render(self) -> ::yawn::ui::View {{",
-                c.name, c.generic_args
-            ));
+            impl_head(w, c, "::yawn::ui::Component for ");
+            w.raw("\n    fn render(self) -> ::yawn::ui::View {");
         }
         w.indent = 2;
         if !c.params.is_empty() {
@@ -1262,14 +1260,25 @@ pub const BODY_END: &str = "// yawn:body-end";
 
 static DYNAMIC: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// `impl<T: Bound> ` with the component's generics as written, so an error in a bound points at
-/// the `.rsx` file
-fn impl_head(w: &mut Writer, c: &Component) {
+/// `impl<T: Bound> {what}Name<T> where .. {` with the bounds as written, so an error in one points
+/// at the `.rsx` file
+fn impl_head(w: &mut Writer, c: &Component, what: &str) {
     w.raw("impl");
     if let Some(g) = &c.generics {
         w.verbatim(g);
     }
-    w.raw(" ");
+    w.raw(&format!(" {what}{}{}", c.name, c.generic_args));
+    where_clause(w, c);
+    w.raw(" {");
+}
+
+fn where_clause(w: &mut Writer, c: &Component) {
+    if let Some(wc) = &c.where_clause {
+        w.raw(" ");
+        w.verbatim(wc);
+        // it may end in a `//` comment
+        w.raw("\n");
+    }
 }
 
 /// Makes generated components render through `yawn::dynamic`, so a dev build can replace a

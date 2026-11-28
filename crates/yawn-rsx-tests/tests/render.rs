@@ -323,6 +323,7 @@ fn generic_components_take_their_types_from_the_props() {
     assert!(html.contains("<span class=\"labeled\">value: 3</span>"), "{html}");
     assert!(html.contains("<span class=\"labeled\">name: x</span>"), "{html}");
     assert!(html.contains("<p class=\"joined\">#1, #2, #3</p>"), "{html}");
+    assert!(html.contains("<b class=\"repeated\">aa</b>"), "{html}");
 }
 
 #[test]

@@ -425,6 +425,32 @@ fn generic_component_errors() {
     assert_eq!(pointed(src, &d), "U", "{}", d.message);
     let (d, _) = err("component A<T(x: T) { view { <b /> } }");
     assert_eq!(d.message, "unclosed `<`");
+    for (src, name) in [
+        ("component A<T>() { view { <b /> } }", "T"),
+        ("component A<'a, T>(x: T) { view { <b /> } }", "'a"),
+        // a bound of another parameter decides nothing: the struct's fields have to hold `T`
+        ("component A<T, F: Fn(T)>(f: F) { view { <b /> } }", "T"),
+    ] {
+        let (d, _) = err(src);
+        assert_eq!(d.message, format!("`{name}` isn't in the type of any prop"));
+        assert_eq!(pointed(src, &d), name);
+    }
+    let src = "component A<T>(x: T) where T: { view { <b /> } }";
+    assert!(ok(src).contains("A<T> where T:\n {"), "an empty bound list is valid Rust");
+    let src = "component A<T>(x: T) where T Clone { view { <b /> } }";
+    let (d, _) = err(src);
+    assert_eq!(pointed(src, &d), "Clone", "{}", d.message);
+}
+
+#[test]
+fn generic_component_with_where() {
+    let src = "component A<'a, T, F>(x: &'a T, f: F)\nwhere\n    F: Fn(&T) -> String + 'static, // f\n{\n    view { <b /> }\n}";
+    let out = ok(src);
+    assert!(
+        out.contains("pub struct A<'a, T, F> where\n    F: Fn(&T) -> String + 'static, // f\n {"),
+        "{out}"
+    );
+    assert!(out.contains("impl<'a, T, F> ::yawn::ui::Component for A<'a, T, F> where\n"), "{out}");
 }
 
 #[test]
